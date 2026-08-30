@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "updated": "2026-08-30",
+  "default": "1.5.4",
+  "comment": [
+    "Pinned ClamAV engine releases that ClamMac knows how to install.",
+    "ClamMac does not redistribute ClamAV. It downloads the official installer",
+    "package published by the ClamAV project and verifies it against the",
+    "sha256 recorded here before unpacking a single byte of it.",
+    "To add a release: download the .pkg, run `shasum -a 256` on it, and add",
+    "an entry. scripts/verify-manifest.py checks every entry in this file."
+  ],
+  "releases": [
+    {
+      "version": "1.5.4",
+      "series": "1.5",
+      "filename": "clamav-1.5.4.macos.universal.pkg",
+      "url": "https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.5.4/clamav-1.5.4.macos.universal.pkg",
+      "mirrors": [
+        "https://www.clamav.net/downloads/production/clamav-1.5.4.macos.universal.pkg"
+      ],
+      "signature_url": "https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.5.4/clamav-1.5.4.macos.universal.pkg.sig",
+      "sha256": "df7fa753e2f9f67f3bc99b2a40a3be7ef559088c68ad6bdf66b4b5764e965bd6",
+      "size": 166772489,
+      "source_url": "https://github.com/Cisco-Talos/clamav/archive/refs/tags/clamav-1.5.4.tar.gz",
+      "release_notes": "https://github.com/Cisco-Talos/clamav/releases/tag/clamav-1.5.4"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store
+._*
+
+# Build output
+*.dmg
+*.app/
+packaging/build/
+packaging/dist/
+
+# Local engine downloads used by the manual smoke tests
+tests/fixtures/*.pkg
