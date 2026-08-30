@@ -23,18 +23,19 @@ import os
 import stat
 import struct
 import zlib
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Callable, Iterator
+from typing import BinaryIO
 from xml.etree import ElementTree
 
 __all__ = [
-    "PackageError",
-    "XarEntry",
-    "XarArchive",
     "CpioEntry",
-    "iter_cpio",
+    "PackageError",
+    "XarArchive",
+    "XarEntry",
     "extract_payload",
+    "iter_cpio",
 ]
 
 _XAR_MAGIC = 0x78617221  # 'xar!'
@@ -111,7 +112,7 @@ class XarArchive:
         self._heap = 0
         self.entries: list[XarEntry] = []
 
-    def __enter__(self) -> "XarArchive":
+    def __enter__(self) -> XarArchive:
         self.open()
         return self
 

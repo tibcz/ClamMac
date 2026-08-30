@@ -22,17 +22,17 @@ from .log import get_logger
 log = get_logger(__name__)
 
 __all__ = [
-    "ThreatAction",
-    "ScanDepth",
-    "Theme",
-    "Frequency",
-    "ScanSettings",
-    "ProtectionSettings",
-    "UpdateSettings",
-    "ScheduleSettings",
-    "InterfaceSettings",
     "Exclusions",
+    "Frequency",
+    "InterfaceSettings",
+    "ProtectionSettings",
+    "ScanDepth",
+    "ScanSettings",
+    "ScheduleSettings",
     "Settings",
+    "Theme",
+    "ThreatAction",
+    "UpdateSettings",
     "load",
     "save",
 ]
@@ -131,7 +131,7 @@ class ScanSettings:
     on_threat: ThreatAction = ThreatAction.QUARANTINE
     low_priority: bool = True
 
-    def apply_depth(self) -> "ScanSettings":
+    def apply_depth(self) -> ScanSettings:
         """Reset the numeric limits to match the chosen preset."""
         if self.depth is ScanDepth.FAST:
             self.max_file_size_mb = 25
@@ -276,7 +276,7 @@ class Settings:
         return _plain(asdict(self))
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "Settings":
+    def from_dict(cls, raw: dict[str, Any]) -> Settings:
         return _build(cls, raw)
 
 
@@ -335,7 +335,7 @@ def _hints(cls: Any) -> dict[str, Any]:
     if cached is None:
         try:
             cached = get_type_hints(cls)
-        except Exception:  # noqa: BLE001 - fall back to runtime types
+        except Exception:
             cached = {}
         _HINT_CACHE[cls] = cached
     return cached

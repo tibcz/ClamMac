@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import paths
@@ -19,7 +19,7 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["next_occurrence", "describe_schedule", "UpdateDue", "update_due", "mark_update_run", "last_update_run"]
+__all__ = ["UpdateDue", "describe_schedule", "last_update_run", "mark_update_run", "next_occurrence", "update_due"]
 
 _STAMP = "last-update.stamp"
 
@@ -100,7 +100,7 @@ def _stamp_path() -> Path:
 
 def mark_update_run(when: datetime | None = None) -> None:
     """Record that a definition update just completed."""
-    stamp = when or datetime.now(timezone.utc)
+    stamp = when or datetime.now(UTC)
     try:
         _stamp_path().write_text(stamp.isoformat(timespec="seconds"), encoding="utf-8")
     except OSError as exc:
@@ -115,12 +115,12 @@ def last_update_run() -> datetime | None:
         parsed = datetime.fromisoformat(path.read_text("utf-8").strip())
     except (OSError, ValueError):
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def update_due(settings: Settings, *, now: datetime | None = None) -> UpdateDue:
     """Is a definition update overdue?"""
-    moment = now or datetime.now(timezone.utc)
+    moment = now or datetime.now(UTC)
     last = last_update_run()
     if not settings.updates.auto_update:
         return UpdateDue(False, last, None, "Automatic updates are turned off")

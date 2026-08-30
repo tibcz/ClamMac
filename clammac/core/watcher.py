@@ -21,11 +21,11 @@ from __future__ import annotations
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 from . import paths
 from .clamd import ClamdClient, ClamdError, ScanVerdict
@@ -34,7 +34,7 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["WatcherState", "WatchEvent", "RealtimeWatcher"]
+__all__ = ["RealtimeWatcher", "WatchEvent", "WatcherState"]
 
 _POLL_INTERVAL = 3.0
 _MAX_TRACKED = 200_000
@@ -62,7 +62,7 @@ class WatchEvent:
 
     path: Path
     verdict: ScanVerdict
-    at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def infected(self) -> bool:
@@ -186,7 +186,7 @@ class RealtimeWatcher:
                 try:
                     self._poll()
                     self._drain_settled()
-                except Exception as exc:  # noqa: BLE001 - keep watching regardless
+                except Exception as exc:
                     log.exception("real-time protection hit an error")
                     self._set_state(WatcherState.DEGRADED, str(exc))
         finally:

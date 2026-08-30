@@ -13,13 +13,13 @@ import html
 import io
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from .history import DetectionRecord, ScanRecord
 from ..version import APP_NAME, HOMEPAGE, VERSION
+from .history import DetectionRecord, ScanRecord
 
-__all__ = ["to_json", "to_csv", "to_html", "write_report", "FORMATS"]
+__all__ = ["FORMATS", "to_csv", "to_html", "to_json", "write_report"]
 
 FORMATS = {"html": "Web page (.html)", "csv": "Spreadsheet (.csv)", "json": "JSON (.json)"}
 
@@ -51,7 +51,7 @@ def _duration(seconds: float) -> str:
 def to_json(scans: list[ScanRecord], detections: list[DetectionRecord]) -> str:
     payload = {
         "generator": {"name": APP_NAME, "version": VERSION, "homepage": HOMEPAGE},
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "scans": [asdict(s) for s in scans],
         "detections": [asdict(d) for d in detections],
     }

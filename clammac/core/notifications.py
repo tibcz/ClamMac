@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
 
+from ..version import APP_NAME
 from . import paths
 from .log import get_logger
-from ..version import APP_NAME
 
 log = get_logger(__name__)
 
-__all__ = ["Urgency", "Notification", "Notifier", "notifier"]
+__all__ = ["Notification", "Notifier", "Urgency", "notifier"]
 
 
 class Urgency(str, Enum):
@@ -69,7 +69,7 @@ class Notifier:
             try:
                 if backend(notification):
                     return True
-            except Exception as exc:  # noqa: BLE001 - fall through to osascript
+            except Exception as exc:
                 log.debug("notification backend failed: %s", exc)
         return _post_via_osascript(notification)
 
@@ -108,7 +108,7 @@ def _post_via_osascript(notification: Notification) -> bool:
         f"subtitle {_quote(notification.subtitle or notification.title)}"
     )
     try:
-        subprocess.run(  # noqa: S603
+        subprocess.run(
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             timeout=15,

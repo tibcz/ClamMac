@@ -11,6 +11,7 @@ import os
 import sys
 import time
 
+
 def main() -> int:
     targets = [a for a in sys.argv[1:] if not a.startswith("-")]
     delay = float(os.environ.get("FAKE_CLAMSCAN_DELAY", "0"))

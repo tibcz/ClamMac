@@ -15,13 +15,14 @@ carry a digest that the download is checked against. That check happens in
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import paths
 
-__all__ = ["EngineRelease", "Manifest", "load_manifest", "MANIFEST_UPDATE_URL"]
+__all__ = ["MANIFEST_UPDATE_URL", "EngineRelease", "Manifest", "load_manifest"]
 
 #: Where a newer manifest may be fetched from, if the user opts in.
 MANIFEST_UPDATE_URL = (
@@ -60,7 +61,7 @@ class EngineRelease:
         return tuple(out)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "EngineRelease":
+    def from_dict(cls, raw: dict[str, Any]) -> EngineRelease:
         missing = [k for k in ("version", "url", "sha256") if not raw.get(k)]
         if missing:
             raise ValueError(f"engine release is missing {', '.join(missing)}")
@@ -109,7 +110,7 @@ class Manifest:
         return self.newest()
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "Manifest":
+    def from_dict(cls, raw: dict[str, Any]) -> Manifest:
         releases: list[EngineRelease] = []
         for item in raw.get("releases", ()):
             try:
@@ -123,7 +124,7 @@ class Manifest:
             releases=releases,
         )
 
-    def merged_with(self, other: "Manifest") -> "Manifest":
+    def merged_with(self, other: Manifest) -> Manifest:
         """Combine two manifests, preferring entries already known locally.
 
         A downloaded manifest may *add* engine versions but may never redefine

@@ -16,7 +16,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-__all__ = ["EICAR_LENGTH", "test_file_bytes", "write_test_file", "is_test_signature"]
+__all__ = ["EICAR_LENGTH", "is_test_signature", "test_file_bytes", "write_test_file"]
 
 #: The standard test string, in pieces.
 _FRAGMENTS = (

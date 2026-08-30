@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import paths
@@ -28,16 +28,16 @@ from .log import get_logger
 log = get_logger(__name__)
 
 __all__ = [
+    "SEARCH_PREFIXES",
+    "DatabaseInfo",
+    "EngineInfo",
     "EngineNotFound",
     "EngineTools",
-    "EngineInfo",
-    "DatabaseInfo",
-    "discover",
     "build_scan_command",
-    "write_freshclam_conf",
-    "write_clamd_conf",
     "database_info",
-    "SEARCH_PREFIXES",
+    "discover",
+    "write_clamd_conf",
+    "write_freshclam_conf",
 ]
 
 #: Directories searched for an engine, in the order they are preferred.
@@ -122,7 +122,7 @@ class DatabaseInfo:
     def age_days(self) -> float | None:
         if self.newest is None:
             return None
-        delta = datetime.now(timezone.utc) - self.newest
+        delta = datetime.now(UTC) - self.newest
         return delta.total_seconds() / 86400.0
 
     def is_stale(self, threshold_days: int) -> bool:
@@ -171,7 +171,7 @@ def _candidate_roots(explicit: str = "") -> list[Path]:
 def _probe(clamscan: Path, timeout: int = 30) -> str | None:
     """Run ``clamscan --version`` and return its first line, or None."""
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [str(clamscan), "--version"],
             capture_output=True,
             text=True,
@@ -271,7 +271,7 @@ def _parse_clamav_date(text: str) -> datetime | None:
             parsed = datetime.strptime(text, pattern)
         except ValueError:
             continue
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     return None
 
 
@@ -314,7 +314,7 @@ def database_info(directory: Path | None = None) -> DatabaseInfo:
         except OSError:
             continue
         total += stat.st_size
-        stamp = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        stamp = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
         if newest is None or stamp > newest:
             newest = stamp
 
@@ -512,5 +512,5 @@ def _current_user() -> str:
         import pwd
 
         return pwd.getpwuid(os.getuid()).pw_name
-    except Exception:  # noqa: BLE001 - fall back to the environment
+    except Exception:
         return os.environ.get("USER", "nobody")

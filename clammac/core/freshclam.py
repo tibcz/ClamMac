@@ -12,12 +12,11 @@ from __future__ import annotations
 import re
 import subprocess
 import threading
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 from . import engine as engine_module
 from . import paths
@@ -26,11 +25,11 @@ from .log import get_logger
 log = get_logger(__name__)
 
 __all__ = [
-    "UpdateOutcome",
-    "UpdateState",
     "DatabaseChange",
-    "UpdateProgress",
     "UpdateJob",
+    "UpdateOutcome",
+    "UpdateProgress",
+    "UpdateState",
     "parse_update_line",
 ]
 
@@ -168,7 +167,7 @@ class UpdateJob:
     database: Path = field(default_factory=paths.database_dir)
 
     on_progress: Callable[[UpdateProgress], None] | None = None
-    on_finished: Callable[["UpdateJob"], None] | None = None
+    on_finished: Callable[[UpdateJob], None] | None = None
     on_log: Callable[[str], None] | None = None
 
     state: UpdateState = UpdateState.IDLE
@@ -188,7 +187,7 @@ class UpdateJob:
             raise RuntimeError("an update is already running")
         self._stop.clear()
         self.state = UpdateState.RUNNING
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
         self.changes.clear()
         self.output.clear()
         self._thread = threading.Thread(target=self._run, name="freshclam", daemon=True)
@@ -213,7 +212,7 @@ class UpdateJob:
     def run_blocking(self) -> UpdateOutcome:
         """Run to completion on the calling thread, for scheduled updates."""
         self.state = UpdateState.RUNNING
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
         self._run()
         return self.outcome
 
@@ -232,7 +231,7 @@ class UpdateJob:
             self._emit(UpdateProgress(UpdateState.RUNNING, "Contacting the ClamAV mirrors"))
             self._log(" ".join(command))
 
-            process = subprocess.Popen(  # noqa: S603
+            process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -269,7 +268,7 @@ class UpdateJob:
             else:
                 self.failure = self._explain(returncode)
                 self._finish(UpdateState.FAILED, UpdateOutcome.FAILED)
-        except Exception as exc:  # noqa: BLE001 - never let an update crash the app
+        except Exception as exc:
             log.exception("definition update failed")
             self.failure = str(exc)
             self._finish(UpdateState.FAILED, UpdateOutcome.FAILED)
@@ -294,7 +293,7 @@ class UpdateJob:
     def _finish(self, state: UpdateState, outcome: UpdateOutcome) -> None:
         self.state = state
         self.outcome = outcome
-        self.finished_at = datetime.now(timezone.utc)
+        self.finished_at = datetime.now(UTC)
         log.info(
             "definition update %s (%s), %d database(s) reported",
             state.value,

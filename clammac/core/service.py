@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import shutil
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
-from . import engine as engine_module
-from . import eicar, freshclam, launchagent, paths, scheduler
 from . import config as config_module
+from . import eicar, freshclam, launchagent, paths, scheduler
+from . import engine as engine_module
 from .clamd import ClamdDaemon, ClamdError
 from .config import Settings, ThreatAction
 from .history import History, ScanRecord
@@ -26,11 +25,11 @@ from .log import get_logger
 from .notifications import notifier
 from .quarantine import Quarantine, QuarantineError
 from .scanner import FileResult, FileStatus, ScanJob, ScanKind
-from .watcher import RealtimeWatcher, WatchEvent, WatcherState
+from .watcher import RealtimeWatcher, WatcherState, WatchEvent
 
 log = get_logger(__name__)
 
-__all__ = ["Health", "ProtectionStatus", "AppService"]
+__all__ = ["AppService", "Health", "ProtectionStatus"]
 
 
 class Health(str, Enum):
@@ -184,7 +183,7 @@ class AppService:
         for callback in list(self._status_listeners):
             try:
                 callback(status)
-            except Exception:  # noqa: BLE001 - a bad listener must not break the app
+            except Exception:
                 log.exception("a status listener raised")
 
     # -- settings ---------------------------------------------------------
@@ -261,7 +260,7 @@ class AppService:
             for listener in list(self._threat_listeners):
                 try:
                     listener(detection, applied)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     log.exception("a threat listener raised")
 
         self.history.record_scan(
@@ -419,7 +418,7 @@ class AppService:
         for listener in list(self._threat_listeners):
             try:
                 listener(detection, applied)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("a threat listener raised")
         self.notify_status()
 
@@ -444,13 +443,13 @@ class AppService:
         """Stop everything cleanly."""
         try:
             self.stop_scan()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             self.stop_protection()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             config_module.save(self.settings)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

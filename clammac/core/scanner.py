@@ -22,12 +22,11 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 from . import engine as engine_module
 from . import paths
@@ -37,13 +36,13 @@ from .log import get_logger
 log = get_logger(__name__)
 
 __all__ = [
+    "FileResult",
     "FileStatus",
     "JobState",
-    "ScanKind",
-    "FileResult",
-    "ScanSummary",
-    "ScanProgress",
     "ScanJob",
+    "ScanKind",
+    "ScanProgress",
+    "ScanSummary",
     "count_files",
     "parse_result_line",
     "parse_summary",
@@ -165,6 +164,9 @@ _OK = re.compile(r"^(?P<path>.*): OK$")
 _EMPTY = re.compile(r"^(?P<path>.*): Empty file$")
 _EXCLUDED = re.compile(r"^(?P<path>.*): Excluded$")
 _ERROR = re.compile(r"^(?P<path>.*): (?P<detail>.*ERROR|.*Access denied.*|Can't .*)$")
+
+#: Directories that hold nothing worth counting and churn constantly.
+_NOISY_DIRS = frozenset({".git", ".Trash", ".Spotlight-V100", ".fseventsd"})
 
 _SUMMARY_HEADER = "----------- SCAN SUMMARY -----------"
 _SUMMARY_FIELDS = {
@@ -288,11 +290,10 @@ def count_files(
             try:
                 with os.scandir(directory) as entries:
                     for entry in entries:
-                        if entry.name.startswith("."):
-                            # Dotfiles are still scanned; only skip the noisy
-                            # caches that never hold anything interesting.
-                            if entry.name in {".git", ".Trash", ".Spotlight-V100", ".fseventsd"}:
-                                continue
+                        # Dotfiles are still counted; only the noisy caches
+                        # that never hold anything interesting are skipped.
+                        if entry.name in _NOISY_DIRS:
+                            continue
                         full = Path(entry.path)
                         if entry.path.startswith(quarantine) or exclusions.excluded(full):
                             continue
@@ -359,7 +360,7 @@ class ScanJob:
             raise RuntimeError("this scan is already running")
         self._stop.clear()
         self.state = JobState.PREPARING
-        self.started_at = datetime.now(timezone.utc)
+        self.started_at = datetime.now(UTC)
         self._monotonic_start = time.monotonic()
         self._thread = threading.Thread(target=self._run, name=f"scan-{self.job_id}", daemon=True)
         self._thread.start()
@@ -461,7 +462,7 @@ class ScanJob:
                 self._finish(JobState.CANCELLED)
                 return
             self._execute()
-        except Exception as exc:  # noqa: BLE001 - a scan must never crash the app
+        except Exception as exc:
             log.exception("scan %s failed", self.job_id)
             self.failure = str(exc)
             self._finish(JobState.FAILED)
@@ -494,7 +495,7 @@ class ScanJob:
 
         # start_new_session gives the child its own process group, so pause,
         # resume and cancel reach clamscan and everything it spawns.
-        process = subprocess.Popen(  # noqa: S603
+        process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -561,7 +562,7 @@ class ScanJob:
     def _finish(self, state: JobState) -> None:
         with self._lock:
             self.state = state
-            self.finished_at = datetime.now(timezone.utc)
+            self.finished_at = datetime.now(UTC)
             self._current = ""
         log.info(
             "scan %s %s: %d scanned, %d infected, %d errors in %.1fs",

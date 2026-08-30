@@ -14,7 +14,7 @@ import sqlite3
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["ScanRecord", "DetectionRecord", "EventRecord", "History"]
+__all__ = ["DetectionRecord", "EventRecord", "History", "ScanRecord"]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS scans (
@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_events_when      ON events (at DESC);
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 @dataclass
@@ -141,8 +141,8 @@ def _parse(text: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(text)
     except (ValueError, TypeError):
-        return datetime.now(timezone.utc)
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return datetime.now(UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 class History:
@@ -306,7 +306,7 @@ class History:
             threats = connection.execute("SELECT COUNT(*) c FROM detections").fetchone()
             recent = connection.execute(
                 "SELECT COUNT(*) c FROM detections WHERE detected_at > ?",
-                ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds"),),
+                ((datetime.now(UTC) - timedelta(days=30)).isoformat(timespec="seconds"),),
             ).fetchone()
         return {
             "scan_count": scans["c"],
@@ -320,7 +320,7 @@ class History:
 
     def prune(self, keep_days: int = 365) -> int:
         """Delete scans older than ``keep_days``. Returns rows removed."""
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat(
+        cutoff = (datetime.now(UTC) - timedelta(days=keep_days)).isoformat(
             timespec="seconds"
         )
         with self._connect() as connection:

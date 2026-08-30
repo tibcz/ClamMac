@@ -31,10 +31,10 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Iterable
 
 from . import paths
 from .log import get_logger
@@ -51,12 +51,12 @@ from .pkgextract import PackageError, XarArchive, extract_payload
 log = get_logger(__name__)
 
 __all__ = [
-    "Stage",
-    "Progress",
-    "ProvisionError",
-    "ProvisionCancelled",
-    "EngineProvisioner",
     "PAYLOAD_PREFIX",
+    "EngineProvisioner",
+    "Progress",
+    "ProvisionCancelled",
+    "ProvisionError",
+    "Stage",
 ]
 
 #: Everything in the ClamAV payload lives under this prefix; ClamMac flattens
@@ -182,7 +182,7 @@ class EngineProvisioner:
                 break
             except ProvisionCancelled:
                 raise
-            except Exception as exc:  # noqa: BLE001 - try the next mirror
+            except Exception as exc:
                 last_error = exc
                 log.warning("download from %s failed: %s", url, exc)
                 target.unlink(missing_ok=True)
@@ -210,7 +210,7 @@ class EngineProvisioner:
         request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
         self._emit(Stage.DOWNLOADING, "Contacting the ClamAV download server", 0.0)
 
-        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=60) as response:
             declared = response.headers.get("Content-Length")
             total = int(declared) if declared and declared.isdigit() else expected_size
             written = 0
@@ -319,7 +319,7 @@ class EngineProvisioner:
     def make_relocatable(self, root: Path) -> int:
         """Point every binary's run-path at its own directory, not /usr/local."""
         self._emit(Stage.RELOCATING, "Adapting the engine to its new location", 0.0)
-        images = [p for p in _iter_images(root)]
+        images = list(_iter_images(root))
         changed = 0
         for index, image in enumerate(images):
             self._check_cancel()
@@ -361,7 +361,7 @@ class EngineProvisioner:
         for index, image in enumerate(images):
             self._check_cancel()
             _strip_quarantine(image)
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 [str(codesign), "--force", "--sign", "-", "--timestamp=none", str(image)],
                 capture_output=True,
                 text=True,
@@ -388,7 +388,7 @@ class EngineProvisioner:
         if not clamscan.exists():
             raise ProvisionError("clamscan is missing from the unpacked engine.")
         try:
-            result = subprocess.run(  # noqa: S603
+            result = subprocess.run(
                 [str(clamscan), "--version"],
                 capture_output=True,
                 text=True,
@@ -447,7 +447,7 @@ class EngineProvisioner:
     def refresh_manifest(self, url: str = MANIFEST_UPDATE_URL) -> Manifest:
         """Fetch a newer engine manifest, keeping locally pinned digests."""
         request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=30) as response:
             payload = response.read(1 << 20)
         target = paths.cache_dir() / "engine_manifest.json"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -476,7 +476,7 @@ def run_admin_install(package: Path, *, timeout: int = 900) -> None:
     """Install the package system-wide, prompting for an administrator."""
     if not paths.is_macos():
         raise ProvisionError("System installation is only available on macOS.")
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         admin_install_command(package), capture_output=True, text=True, timeout=timeout
     )
     if result.returncode != 0:
@@ -488,7 +488,7 @@ def run_admin_install(package: Path, *, timeout: int = 900) -> None:
 
 def open_in_installer(package: Path) -> None:
     """Hand the package to Apple's Installer app so the user drives it."""
-    subprocess.Popen(["/usr/bin/open", str(package)])  # noqa: S603
+    subprocess.Popen(["/usr/bin/open", str(package)])
 
 
 def _applescript_quote(value: str) -> str:

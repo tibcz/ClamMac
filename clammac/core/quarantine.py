@@ -24,7 +24,7 @@ import tempfile
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import paths
@@ -32,7 +32,7 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["QuarantineError", "QuarantineEntry", "Quarantine"]
+__all__ = ["Quarantine", "QuarantineEntry", "QuarantineError"]
 
 _INDEX_NAME = "index.json"
 _STORE_NAME = "store"
@@ -66,7 +66,7 @@ class QuarantineEntry:
         try:
             return datetime.fromisoformat(self.quarantined_at)
         except ValueError:
-            return datetime.now(timezone.utc)
+            return datetime.now(UTC)
 
     @property
     def display_path(self) -> str:
@@ -76,8 +76,8 @@ class QuarantineEntry:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: dict) -> "QuarantineEntry":
-        known = {f for f in cls.__dataclass_fields__}
+    def from_dict(cls, raw: dict) -> QuarantineEntry:
+        known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in raw.items() if k in known})
 
 
@@ -212,7 +212,7 @@ class Quarantine:
             entry_id=entry_id,
             original_path=str(source),
             signature=signature,
-            quarantined_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            quarantined_at=datetime.now(UTC).isoformat(timespec="seconds"),
             size=stat.st_size,
             sha256=digest,
             original_mode=stat.st_mode & 0o7777,

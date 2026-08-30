@@ -33,7 +33,7 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["ClamdError", "ClamdClient", "ClamdDaemon", "ScanVerdict"]
+__all__ = ["ClamdClient", "ClamdDaemon", "ClamdError", "ScanVerdict"]
 
 _TERMINATOR = b"\x00"
 _INSTREAM_CHUNK = 1 << 16
@@ -76,7 +76,7 @@ class ClamdClient:
         try:
             connection.connect(str(self.socket_path))
             yield connection
-        except (OSError, socket.timeout) as exc:
+        except (TimeoutError, OSError) as exc:
             raise ClamdError(f"could not talk to clamd: {exc}") from exc
         finally:
             with contextlib.suppress(OSError):
@@ -93,7 +93,7 @@ class ClamdClient:
         while True:
             try:
                 chunk = connection.recv(4096)
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 raise ClamdError("clamd stopped responding") from exc
             if not chunk:
                 break
@@ -227,7 +227,7 @@ class ClamdDaemon:
             self._clear_stale_socket()
 
             log.info("starting clamd with %s", config)
-            self._process = subprocess.Popen(  # noqa: S603
+            self._process = subprocess.Popen(
                 [str(self.tools.clamd), f"--config-file={config}"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

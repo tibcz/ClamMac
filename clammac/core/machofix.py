@@ -29,14 +29,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = [
+    "CLAMAV_INSTALL_RPATH",
+    "PORTABLE_RPATH",
     "MachOError",
     "SliceInfo",
-    "read_rpaths",
-    "read_linked_dylibs",
-    "rewrite_rpath",
     "is_macho",
-    "PORTABLE_RPATH",
-    "CLAMAV_INSTALL_RPATH",
+    "read_linked_dylibs",
+    "read_rpaths",
+    "rewrite_rpath",
 ]
 
 FAT_MAGIC = 0xCAFEBABE

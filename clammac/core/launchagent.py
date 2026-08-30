@@ -18,14 +18,14 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from ..version import APP_ID
 from . import paths
 from .config import Frequency, ScheduleSettings, Settings
 from .log import get_logger
-from ..version import APP_ID
 
 log = get_logger(__name__)
 
-__all__ = ["AgentKind", "LaunchAgentError", "agent_path", "install", "uninstall", "is_installed", "sync_all"]
+__all__ = ["AgentKind", "LaunchAgentError", "agent_path", "install", "is_installed", "sync_all", "uninstall"]
 
 
 class AgentKind(str, Enum):
@@ -129,7 +129,7 @@ def _domain() -> str:
 
 
 def _launchctl(*arguments: str, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(  # noqa: S603
+    return subprocess.run(
         ["/bin/launchctl", *arguments],
         capture_output=True,
         text=True,

@@ -51,7 +51,18 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
-ignore = ["E501", "B008", "RUF012"]
+ignore = [
+  "E501",    # line length is handled by the formatter, not enforced here
+  "B008",    # Qt and dataclass idioms legitimately call in argument defaults
+  "RUF012",  # dataclass-style mutable class attributes are used deliberately
+  "UP042",   # str+Enum mixin is intentional: members compare equal to their
+             # stored JSON values, which StrEnum only gained in 3.11 and which
+             # keeps settings files readable and forward-compatible
+  "SIM105",  # try/except/pass reads more plainly than contextlib.suppress in
+             # the best-effort cleanup paths where it is used
+  "SIM115",  # the two NamedTemporaryFile uses are deliberate: the file must
+             # outlive the block so it can be atomically renamed into place
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
