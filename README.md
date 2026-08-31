@@ -1,3 +1,5 @@
+<img width="360" height="360" alt="38ba4007-c0c2-4b3b-93c9-675da4e598c5" src="https://github.com/user-attachments/assets/7f70daab-aa63-4e7b-bfd1-e39ef971a7c0" />
+
 # ClamMac
 
 A native macOS antivirus application built around the ClamAV scanning engine.
@@ -14,7 +16,7 @@ scanned and what was found.
 
 ---
 
-## Install
+## Install (MacOS ARM Devices)
 
 1. Download `ClamMac-<version>.dmg` from the
    [Releases page](https://github.com/tibcz/ClamMac/releases).
