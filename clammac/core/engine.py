@@ -376,8 +376,16 @@ def build_scan_command(
         f"--alert-broken={_yesno(scan.alert_broken_executables)}",
         f"--heuristic-alerts={_yesno(scan.heuristic_alerts)}",
         f"--cross-fs={_yesno(scan.cross_filesystems)}",
-        f"--follow-dir-symlinks={2 if scan.follow_directory_symlinks else 0}",
-        f"--follow-file-symlinks={2 if scan.follow_file_symlinks else 0}",
+        # 2 = follow every symlink, 1 = follow only what was named on the
+        # command line, 0 = follow none at all. Zero is the wrong "off": it
+        # also refuses the target the user explicitly asked for, so scanning a
+        # symlinked folder reports nothing at all rather than refusing. On
+        # macOS that silently costs every quick scan its /tmp coverage, since
+        # /tmp is a symlink to /private/tmp. One is clamscan's own default and
+        # the honest reading of "do not follow symlinks": do not wander into
+        # them while walking, but do scan what you were pointed at.
+        f"--follow-dir-symlinks={2 if scan.follow_directory_symlinks else 1}",
+        f"--follow-file-symlinks={2 if scan.follow_file_symlinks else 1}",
     ]
     if recursive:
         command.append("--recursive")

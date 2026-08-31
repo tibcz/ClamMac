@@ -129,3 +129,179 @@ class TestBundledManifest:
         cached = tmp_path / "engine_manifest.json"
         cached.write_text("{ not json")
         assert load_manifest(cached).preferred() is not None
+
+
+class TestFilenameIsConfinedToTheCache:
+    """The filename becomes a path under ClamMac's cache directory.
+
+    A manifest can be fetched over the network, so a name carrying ``..`` or a
+    separator would let a hostile or corrupted one steer the download outside
+    the cache -- and the write happens before the digest check can reject it.
+    Only a bare final component is ever accepted.
+    """
+
+    @pytest.mark.parametrize(
+        "hostile",
+        [
+            "../../../../Library/LaunchAgents/evil.plist",
+            "/etc/cron.d/evil",
+            "..",
+            ".",
+            "",
+            "   ",
+            "sub/dir/clamav.pkg",
+            "back\\slash.pkg",
+        ],
+    )
+    def test_a_traversing_filename_never_survives_as_one(self, hostile):
+        payload = _release("9.9.9", filename=hostile)
+        try:
+            release = EngineRelease.from_dict(payload)
+        except ValueError:
+            return  # rejected outright, which is the other acceptable outcome
+        assert "/" not in release.filename
+        assert "\\" not in release.filename
+        assert release.filename not in {"", ".", ".."}
+
+    def test_a_traversing_filename_cannot_escape_the_cache(self, tmp_path):
+        from pathlib import Path
+
+        payload = _release("9.9.9", filename="../../escaped.pkg")
+        try:
+            release = EngineRelease.from_dict(payload)
+        except ValueError:
+            return
+        target = (tmp_path / release.filename).resolve()
+        assert target.parent == Path(tmp_path).resolve()
+
+    def test_a_malformed_entry_does_not_poison_the_whole_manifest(self):
+        manifest = Manifest.from_dict(
+            {"releases": [_release("9.9.9", filename="../evil"), _release("1.2.3")]}
+        )
+        assert manifest.get("1.2.3") is not None
+
+    def test_an_ordinary_filename_is_untouched(self):
+        release = EngineRelease.from_dict(
+            _release("1.5.4", filename="clamav-1.5.4.macos.universal.pkg")
+        )
+        assert release.filename == "clamav-1.5.4.macos.universal.pkg"
+
+
+class TestManifestRefresh:
+    """An old build must not be frozen on the engine it shipped with.
+
+    The refresh is best-effort in both directions: it must pick up a newer
+    release when it can, and it must never turn a network problem into a
+    failed install.
+    """
+
+    def _provisioner(self, monkeypatch, payload, *, boom=None):
+        from clammac.core import provisioner as provisioner_module
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self, _n=-1):
+                return payload
+
+        def fake_urlopen(request, timeout=0):
+            if boom is not None:
+                raise boom
+            return _Response()
+
+        monkeypatch.setattr(provisioner_module.urllib.request, "urlopen", fake_urlopen)
+        return provisioner_module.EngineProvisioner()
+
+    def test_a_newer_release_becomes_preferred(self, monkeypatch):
+        payload = json.dumps(
+            {"default": "99.0.0", "releases": [_release("99.0.0")]}
+        ).encode()
+        provisioner = self._provisioner(monkeypatch, payload)
+        assert provisioner.try_refresh_manifest() is True
+        preferred = provisioner.manifest.preferred()
+        assert preferred is not None and preferred.version == "99.0.0"
+
+    def test_the_shipped_releases_survive_the_refresh(self, monkeypatch):
+        payload = json.dumps({"releases": [_release("99.0.0")]}).encode()
+        provisioner = self._provisioner(monkeypatch, payload)
+        provisioner.try_refresh_manifest()
+        assert provisioner.manifest.get("1.5.4") is not None
+
+    def test_a_remote_manifest_cannot_redefine_a_shipped_digest(self, monkeypatch):
+        """The whole point of merging local-first."""
+        payload = json.dumps(
+            {"releases": [_release("1.5.4", sha256="b" * 64)]}
+        ).encode()
+        provisioner = self._provisioner(monkeypatch, payload)
+        provisioner.try_refresh_manifest()
+        shipped = provisioner.manifest.get("1.5.4")
+        assert shipped is not None
+        assert shipped.sha256 != "b" * 64
+
+    def test_a_network_failure_is_not_an_error(self, monkeypatch):
+        provisioner = self._provisioner(monkeypatch, b"", boom=OSError("no route to host"))
+        assert provisioner.try_refresh_manifest() is False
+        assert provisioner.manifest.preferred() is not None
+
+    def test_junk_is_rejected_rather_than_cached(self, monkeypatch, tmp_path):
+        from clammac.core import paths
+
+        provisioner = self._provisioner(monkeypatch, b"<html>captive portal</html>")
+        assert provisioner.try_refresh_manifest() is False
+        assert not (paths.cache_dir() / "engine_manifest.json").exists()
+        assert provisioner.manifest.preferred() is not None
+
+    def test_an_empty_manifest_is_rejected(self, monkeypatch):
+        from clammac.core import paths
+
+        provisioner = self._provisioner(monkeypatch, json.dumps({"releases": []}).encode())
+        assert provisioner.try_refresh_manifest() is False
+        assert not (paths.cache_dir() / "engine_manifest.json").exists()
+
+    def test_a_non_https_manifest_url_is_refused(self, monkeypatch):
+        from clammac.core.provisioner import EngineProvisioner, ProvisionError
+
+        with pytest.raises(ProvisionError):
+            EngineProvisioner().refresh_manifest("http://example.invalid/manifest.json")
+
+    def test_install_refreshes_before_choosing(self, monkeypatch, tmp_path):
+        """The refresh has to actually be wired into the install path.
+
+        This is the whole point of the change: without it the code exists but
+        is never reached, and every build stays pinned to the engine list it
+        shipped with.
+        """
+        from clammac.core import provisioner as provisioner_module
+
+        called: list[str] = []
+        provisioner = provisioner_module.EngineProvisioner()
+        monkeypatch.setattr(
+            provisioner, "try_refresh_manifest", lambda *a, **k: called.append("refresh") or True
+        )
+        monkeypatch.setattr(
+            provisioner, "fetch_package", lambda release: (_ for _ in ()).throw(RuntimeError("stop"))
+        )
+        with pytest.raises(RuntimeError, match="stop"):
+            provisioner.install()
+        assert called == ["refresh"]
+
+    def test_an_explicit_release_skips_the_refresh(self, monkeypatch):
+        """Reinstalling a specific pinned version needs no network at all."""
+        from clammac.core import provisioner as provisioner_module
+
+        called: list[str] = []
+        provisioner = provisioner_module.EngineProvisioner()
+        monkeypatch.setattr(
+            provisioner, "try_refresh_manifest", lambda *a, **k: called.append("refresh") or True
+        )
+        monkeypatch.setattr(
+            provisioner, "fetch_package", lambda release: (_ for _ in ()).throw(RuntimeError("stop"))
+        )
+        chosen = provisioner.manifest.preferred()
+        with pytest.raises(RuntimeError, match="stop"):
+            provisioner.install(chosen)
+        assert called == []

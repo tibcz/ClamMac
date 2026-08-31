@@ -237,9 +237,9 @@ def parse_summary(lines: list[str]) -> ScanSummary:
             except (ValueError, TypeError):
                 pass
         elif key == "Data scanned":
-            summary.data_scanned_mb = _leading_float(value)
+            summary.data_scanned_mb = _size_in_mb(value)
         elif key == "Data read":
-            summary.data_read_mb = _leading_float(value)
+            summary.data_read_mb = _size_in_mb(value)
         elif key == "Time":
             summary.seconds = _leading_float(value)
     return summary
@@ -248,6 +248,39 @@ def parse_summary(lines: list[str]) -> ScanSummary:
 def _leading_float(value: str) -> float:
     match = re.match(r"\s*([0-9]+(?:\.[0-9]+)?)", value)
     return float(match.group(1)) if match else 0.0
+
+
+#: How many megabytes one of clamscan's units is worth. It picks the unit to
+#: suit the number -- "170 B" for a handful of files, "6.64 MiB", "3.2 GiB" --
+#: so reading the figure without its unit is wrong by a factor of a thousand
+#: in either direction. Binary units are converted honestly rather than
+#: treated as their decimal near-namesakes.
+_SIZE_UNITS_IN_MB = {
+    "b": 1 / 1e6,
+    "kb": 1e-3,
+    "kib": 1024 / 1e6,
+    "mb": 1.0,
+    "mib": 1024 * 1024 / 1e6,
+    "gb": 1e3,
+    "gib": 1024 * 1024 * 1024 / 1e6,
+    "tb": 1e6,
+    "tib": 1024**4 / 1e6,
+}
+
+_SIZE = re.compile(r"\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGT]i?B|B)\b", re.IGNORECASE)
+
+
+def _size_in_mb(value: str) -> float:
+    """Read one of clamscan's size figures and return it in megabytes.
+
+    A bare number with no unit is taken as megabytes, which is what older
+    ClamAV releases printed and what the field has always been named for.
+    """
+    match = _SIZE.match(value)
+    if match is None:
+        return _leading_float(value)
+    amount = float(match.group(1))
+    return amount * _SIZE_UNITS_IN_MB.get(match.group(2).lower(), 1.0)
 
 
 # --------------------------------------------------------------------------

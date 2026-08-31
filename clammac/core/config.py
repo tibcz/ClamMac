@@ -220,7 +220,6 @@ class ScheduleSettings:
     weekday: int = 6  # Sunday, matching Python's Monday=0 convention
     day_of_month: int = 1
     target: str = "quick"  # "quick", "full", or an explicit path
-    only_when_idle: bool = False
 
 
 @dataclass
@@ -228,7 +227,6 @@ class InterfaceSettings:
     theme: Theme = Theme.SYSTEM
     show_menu_bar_item: bool = True
     launch_at_login: bool = False
-    start_minimised: bool = False
     close_to_menu_bar: bool = True
     notifications: bool = True
     sound_on_threat: bool = True
@@ -246,7 +244,6 @@ class Exclusions:
 
     paths: list[str] = field(default_factory=list)
     extensions: list[str] = field(default_factory=list)
-    skip_larger_than_mb: int = 0  # 0 means no size-based exclusion
 
     def excluded(self, candidate: Path) -> bool:
         text = str(candidate)

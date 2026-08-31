@@ -101,7 +101,8 @@ Qt
 PySide6 and Qt are used under the LGPL-3.0. They are dynamically linked and
 shipped as unmodified shared libraries, so you may replace them with your own
 build. The procedure required by LGPL-3.0 section 4(d) is documented in
-docs/RELINKING.md in the project repository.
+docs/RELINKING.md, which is included in this application bundle alongside the
+full text of the LGPL-3.0 in LICENSES/LGPL-3.0.txt.
 
 Everything else in the bundle -- all Python source, the application icon, and
 every other asset -- is original work under ClamMac's own GPL-3.0 licence.

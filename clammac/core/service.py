@@ -191,6 +191,7 @@ class AppService:
     def save_settings(self) -> None:
         config_module.save(self.settings)
         notifier.set_enabled(self.settings.interface.notifications)
+        notifier.set_sound_enabled(self.settings.interface.sound_on_threat)
         if self.watcher is not None:
             self.watcher.reconfigure(self.settings)
         if paths.is_macos():

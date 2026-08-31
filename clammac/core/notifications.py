@@ -20,7 +20,7 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["Notification", "Notifier", "Urgency", "notifier"]
+__all__ = ["THREAT_SOUND", "Notification", "Notifier", "Urgency", "notifier"]
 
 
 class Urgency(str, Enum):
@@ -40,12 +40,19 @@ class Notification:
 Backend = Callable[[Notification], bool]
 
 
+#: The alert macOS plays for a detection. One of the sounds every install
+#: has in /System/Library/Sounds, so there is nothing to ship and nothing to
+#: go missing.
+THREAT_SOUND = "Basso"
+
+
 class Notifier:
     """Posts notifications through whichever backend is available."""
 
     def __init__(self) -> None:
         self._backend: Backend | None = None
         self._enabled = True
+        self._sound = True
         self._lock = threading.Lock()
 
     def set_backend(self, backend: Backend | None) -> None:
@@ -56,22 +63,39 @@ class Notifier:
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
 
+    def set_sound_enabled(self, enabled: bool) -> None:
+        """Whether a detection is announced audibly as well as visually."""
+        self._sound = enabled
+
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def sound_enabled(self) -> bool:
+        return self._sound
 
     def post(self, notification: Notification) -> bool:
         if not self._enabled:
             return False
         with self._lock:
             backend = self._backend
+        posted = False
         if backend is not None:
             try:
-                if backend(notification):
-                    return True
+                posted = bool(backend(notification))
             except Exception as exc:
                 log.debug("notification backend failed: %s", exc)
-        return _post_via_osascript(notification)
+        if not posted:
+            # osascript can carry the sound itself, so let it, rather than
+            # playing the same alert twice.
+            return _post_via_osascript(notification, sound=self._wants_sound(notification))
+        if self._wants_sound(notification):
+            _play_alert()
+        return True
+
+    def _wants_sound(self, notification: Notification) -> bool:
+        return self._sound and notification.urgency is Urgency.THREAT
 
     # -- convenience ------------------------------------------------------
 
@@ -97,7 +121,7 @@ class Notifier:
         )
 
 
-def _post_via_osascript(notification: Notification) -> bool:
+def _post_via_osascript(notification: Notification, *, sound: bool = False) -> bool:
     """Last-resort notification path for when there is no GUI running."""
     if not paths.is_macos():
         log.info("notification: %s -- %s", notification.title, notification.body)
@@ -107,6 +131,8 @@ def _post_via_osascript(notification: Notification) -> bool:
         f"with title {_quote(APP_NAME)} "
         f"subtitle {_quote(notification.subtitle or notification.title)}"
     )
+    if sound:
+        script += f" sound name {_quote(THREAT_SOUND)}"
     try:
         subprocess.run(
             ["/usr/bin/osascript", "-e", script],
@@ -116,6 +142,27 @@ def _post_via_osascript(notification: Notification) -> bool:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.debug("osascript notification failed: %s", exc)
+        return False
+    return True
+
+
+def _play_alert(name: str = THREAT_SOUND) -> bool:
+    """Play one of the system alert sounds, without waiting for it.
+
+    Used when a richer backend has already shown the notification but cannot
+    make a noise of its own -- Qt's tray balloon, for one.
+    """
+    if not paths.is_macos():
+        return False
+    sound = f"/System/Library/Sounds/{name}.aiff"
+    try:
+        subprocess.Popen(
+            ["/usr/bin/afplay", sound],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("could not play the alert sound: %s", exc)
         return False
     return True
 

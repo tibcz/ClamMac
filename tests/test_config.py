@@ -159,3 +159,42 @@ class TestProtectionPaths:
         settings.watch_removable = False
         settings.extra_paths = [str(tmp_path / "Downloads")]
         assert settings.watched_paths() == [tmp_path / "Downloads"]
+
+
+class TestRemovedSettings:
+    """Three settings were declared but never read by anything.
+
+    A setting the code never consults is worse than absent: it looks like a
+    knob, saves and reloads like a knob, and does nothing. ``sound_on_threat``
+    was the same and got an implementation instead; these three had no
+    plausible one, so they went.
+    """
+
+    @pytest.mark.parametrize(
+        ("owner", "name"),
+        [
+            ("schedule", "only_when_idle"),
+            ("interface", "start_minimised"),
+            ("exclusions", "skip_larger_than_mb"),
+        ],
+    )
+    def test_the_setting_is_gone(self, owner, name):
+        section = getattr(config.Settings(), owner)
+        assert not hasattr(section, name)
+
+    def test_an_old_settings_file_still_loads(self, tmp_path):
+        """Removing a field must not break a file written by 1.0.0."""
+        target = tmp_path / "settings.json"
+        target.write_text(
+            json.dumps(
+                {
+                    "schedule": {"only_when_idle": True, "hour": 4},
+                    "interface": {"start_minimised": True, "notifications": False},
+                    "exclusions": {"skip_larger_than_mb": 500, "extensions": ["iso"]},
+                }
+            )
+        )
+        settings = config.load(target)
+        assert settings.schedule.hour == 4
+        assert settings.interface.notifications is False
+        assert settings.exclusions.extensions == ["iso"]

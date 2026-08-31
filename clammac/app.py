@@ -185,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = config_module.load()
     notifier.set_enabled(settings.interface.notifications)
+    notifier.set_sound_enabled(settings.interface.sound_on_threat)
 
     if arguments.scheduled_scan:
         return run_scheduled_scan(arguments.scheduled_scan)

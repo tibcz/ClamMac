@@ -25,6 +25,7 @@ degrades into the next instead of leaving a half-installed engine behind.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -134,9 +135,23 @@ class EngineProvisioner:
 
     # -- public API -------------------------------------------------------
 
-    def install(self, release: EngineRelease | None = None) -> Path:
-        """Provision an engine and return the directory it was installed to."""
+    def install(self, release: EngineRelease | None = None, *, refresh: bool = True) -> Path:
+        """Provision an engine and return the directory it was installed to.
+
+        Unless ``release`` names one explicitly, the manifest is refreshed
+        first so that a build shipped a year ago can still install a current
+        engine. Without that, the pinned list is frozen at whatever was known
+        on the day the application was built, and every user of an older
+        ClamMac is stuck on an engine that will not move again.
+
+        The refresh is best-effort and cannot weaken anything: a downloaded
+        manifest may only *add* releases, never redefine the digest of one
+        that shipped with the application, and every download is still checked
+        against a digest before it is opened.
+        """
         self._emit(Stage.RESOLVING, "Choosing a ClamAV release")
+        if release is None and refresh:
+            self.try_refresh_manifest()
         chosen = release or self.manifest.preferred()
         if chosen is None:
             raise ProvisionError(
@@ -445,15 +460,49 @@ class EngineProvisioner:
         return freed
 
     def refresh_manifest(self, url: str = MANIFEST_UPDATE_URL) -> Manifest:
-        """Fetch a newer engine manifest, keeping locally pinned digests."""
+        """Fetch a newer engine manifest, keeping locally pinned digests.
+
+        The response is parsed before it is cached, so a captive portal or an
+        error page cannot leave unusable JSON sitting in the cache directory
+        for every later run to trip over.
+        """
+        if not url.lower().startswith("https://"):
+            raise ProvisionError(f"refusing to fetch a manifest over a non-HTTPS URL: {url}")
         request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = response.read(1 << 20)
+
+        parsed = json.loads(payload.decode("utf-8"))
+        if not isinstance(parsed, dict) or not Manifest.from_dict(parsed).releases:
+            raise ProvisionError("the downloaded manifest contained no usable releases")
+
         target = paths.cache_dir() / "engine_manifest.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
         self.manifest = load_manifest()
         return self.manifest
+
+    def try_refresh_manifest(self, url: str = MANIFEST_UPDATE_URL) -> bool:
+        """Refresh the manifest, treating any failure as simply "no news".
+
+        Being unable to reach the manifest is not a reason to refuse to
+        install: the copy that shipped with the application is still pinned,
+        still digest-checked, and still perfectly installable.
+        """
+        before = self.manifest.preferred()
+        try:
+            self.refresh_manifest(url)
+        except (OSError, ValueError, ProvisionError, urllib.error.URLError) as exc:
+            log.info("could not refresh the engine manifest (%s); using what shipped", exc)
+            return False
+
+        after = self.manifest.preferred()
+        if after is not None and (before is None or after.version != before.version):
+            log.info(
+                "engine manifest refreshed: %s is now the preferred release",
+                after.version,
+            )
+        return True
 
 
 # --------------------------------------------------------------------------

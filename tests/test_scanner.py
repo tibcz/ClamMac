@@ -65,6 +65,7 @@ class TestParsing:
         assert parse_result_line(line) is None
 
     def test_summary(self):
+        """The shape ClamAV 1.5 actually prints, binary units and all."""
         summary = parse_summary(
             [
                 "----------- SCAN SUMMARY -----------",
@@ -73,20 +74,64 @@ class TestParsing:
                 "Scanned directories: 412",
                 "Scanned files: 9871",
                 "Infected files: 2",
-                "Data scanned: 1204.55 MB",
-                "Data read: 980.12 MB (ratio 1.23:1)",
+                "Data scanned: 1204.55 MiB",
+                "Data read: 980.12 MiB (ratio 1.23:1)",
                 "Time: 133.482 sec (2 m 13 s)",
+                "Start Date: 2026:08:31 08:16:46",
+                "End Date:   2026:08:31 08:18:59",
             ]
         )
         assert summary.known_viruses == 8690123
         assert summary.engine_version == "1.5.4"
         assert summary.scanned_files == 9871
         assert summary.infected_files == 2
-        assert summary.data_scanned_mb == pytest.approx(1204.55)
+        assert summary.data_scanned_mb == pytest.approx(1204.55 * 1024**2 / 1e6)
         assert summary.seconds == pytest.approx(133.482)
 
     def test_a_partial_summary_does_not_raise(self):
         assert parse_summary(["Scanned files: not a number", "nonsense"]).scanned_files == 0
+
+
+class TestSummarySizeUnits:
+    """clamscan picks the unit to suit the number; the reader must follow.
+
+    Taking the leading figure and calling it megabytes -- which is what the
+    field is named for and what the parser used to do -- is wrong by a factor
+    of a thousand in either direction, and the wrong number is what lands in
+    the history database and in every exported report.
+    """
+
+    @pytest.mark.parametrize(
+        ("printed", "expected_mb"),
+        [
+            ("170 B", 170 / 1e6),
+            ("512 B", 512 / 1e6),
+            ("800.00 KiB", 800 * 1024 / 1e6),
+            ("6.64 MiB", 6.64 * 1024**2 / 1e6),
+            ("3.20 GiB", 3.20 * 1024**3 / 1e6),
+        ],
+    )
+    def test_binary_units_are_converted(self, printed, expected_mb):
+        summary = parse_summary([f"Data scanned: {printed}"])
+        assert summary.data_scanned_mb == pytest.approx(expected_mb)
+
+    def test_data_read_uses_the_same_conversion(self):
+        summary = parse_summary(["Data read: 2.00 GiB (ratio 1.08:1)"])
+        assert summary.data_read_mb == pytest.approx(2 * 1024**3 / 1e6)
+
+    def test_a_tiny_scan_is_not_reported_as_hundreds_of_megabytes(self):
+        """The regression in its plainest form: 170 bytes is not 170 MB."""
+        assert parse_summary(["Data scanned: 170 B"]).data_scanned_mb < 1
+
+    def test_a_huge_scan_is_not_reported_as_a_handful_of_megabytes(self):
+        assert parse_summary(["Data scanned: 3.20 GiB"]).data_scanned_mb > 1000
+
+    def test_decimal_units_are_honoured_too(self):
+        assert parse_summary(["Data scanned: 12.34 MB"]).data_scanned_mb == pytest.approx(12.34)
+
+    def test_a_bare_number_is_still_read_as_megabytes(self):
+        """What older ClamAV printed, and what the field is named for."""
+        assert parse_summary(["Data scanned: 1204.55"]).data_scanned_mb == pytest.approx(1204.55)
 
 
 class TestProgress:

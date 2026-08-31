@@ -163,6 +163,35 @@ def verify_plist() -> None:
           f"minimum macOS {plist['LSMinimumSystemVersion']}, all usage strings present")
 
 
+def verify_licences() -> None:
+    """Confirm the licence files the bundle is obliged to carry are in it.
+
+    Qt and PySide6 ride along under the LGPL-3.0, so a copy of that licence
+    has to travel with the bundle (section 4(b)) and the relinking procedure
+    has to be readable by someone who only has the .app (section 4(d)). Both
+    are one line in the spec and easy to drop in a refactor, so the build
+    checks rather than trusts.
+    """
+    announce("Checking the bundled licences")
+    resources = APP_PATH / "Contents" / "Resources"
+    frameworks = APP_PATH / "Contents" / "Frameworks"
+    required = ["LICENSE", "NOTICE.md", "LICENSES/LGPL-3.0.txt", "docs/RELINKING.md"]
+
+    missing = [
+        name
+        for name in required
+        if not (resources / name).exists() and not (frameworks / name).exists()
+    ]
+    if missing:
+        raise BuildError(
+            "the bundle is missing " + ", ".join(missing) + ".\n"
+            "Qt and PySide6 ship inside it under the LGPL-3.0, which requires "
+            "a copy of that licence and the relinking procedure to be supplied "
+            "with the combined work. Add them to DATA_FILES in ClamMac.spec."
+        )
+    print(f"    all {len(required)} licence documents present")
+
+
 def sign(identity: str | None) -> None:
     announce("Signing")
     codesign = "/usr/bin/codesign"
@@ -331,6 +360,7 @@ def main() -> int:
         build_icon()
         run_pyinstaller(clean=not arguments.no_clean)
         verify_plist()
+        verify_licences()
         sign(os.environ.get("CODESIGN_IDENTITY") or None)
 
         profile = os.environ.get("NOTARY_PROFILE")

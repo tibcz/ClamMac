@@ -31,6 +31,7 @@ __all__ = [
     "UpdateProgress",
     "UpdateState",
     "parse_update_line",
+    "strip_log_prefix",
 ]
 
 
@@ -99,6 +100,36 @@ _DOWNLOADING = re.compile(
 )
 _TESTING = re.compile(r"Testing database", re.IGNORECASE)
 
+#: What ``LogTime yes`` puts in front of every line freshclam prints, plus the
+#: severity marker it prefixes warnings and errors with. ClamMac's own
+#: generated freshclam.conf sets ``LogTime yes``, so *every* line arrives
+#: looking like::
+#:
+#:     WARNING: Mon Aug 31 08:19:52 2026 -> Can't download daily.cvd
+#:
+#: The report patterns above are anchored at the start of the message, so the
+#: prefix has to come off before they are applied. Leaving it on is not a
+#: cosmetic problem: no line matches, no DatabaseChange is ever recorded, and
+#: an update that downloaded a fresh database reports itself as "already up to
+#: date" -- which in turn means clamd is never told to reload it.
+_LOG_PREFIX = re.compile(
+    r"^(?:(?:WARNING|ERROR|INFO):\s*)?"
+    r"(?:\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s*->\s*)"
+)
+
+
+def strip_log_prefix(text: str) -> str:
+    """Remove freshclam's severity and timestamp decoration from a line.
+
+    Applied repeatedly: freshclam sometimes folds two messages onto one line,
+    each carrying its own prefix.
+    """
+    previous = None
+    while previous != text:
+        previous = text
+        text = _LOG_PREFIX.sub("", text, count=1).lstrip()
+    return text
+
 
 def parse_update_line(line: str) -> tuple[DatabaseChange | None, UpdateProgress | None]:
     """Interpret one line of freshclam output.
@@ -106,7 +137,7 @@ def parse_update_line(line: str) -> tuple[DatabaseChange | None, UpdateProgress 
     Returns a database change when the line reports one, and/or a progress
     update when the line carries one. Most lines produce neither.
     """
-    text = line.strip()
+    text = strip_log_prefix(line.strip())
     if not text:
         return None, None
 

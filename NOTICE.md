@@ -104,6 +104,12 @@ shipped as unmodified shared libraries inside the application bundle, so you may
 replace them with your own build: see [`docs/RELINKING.md`](docs/RELINKING.md)
 for the procedure required by LGPL-3.0 §4(d).
 
+The full text of the LGPL-3.0 — which incorporates the GNU GPL v3 it is built
+on — is in [`LICENSES/LGPL-3.0.txt`](LICENSES/LGPL-3.0.txt). Both that file and
+`docs/RELINKING.md` are copied into the application bundle, so everything
+LGPL-3.0 §4(b) and §4(d) ask to be supplied with the combined work travels with
+it rather than only living in this repository.
+
 Everything else in the application bundle — all Python source, the application
 icon, and every other asset — is original work covered by ClamMac's own GPL-3.0
 licence.

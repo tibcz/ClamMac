@@ -58,6 +58,13 @@ DATA_FILES = [
     (str(REPO_ROOT / "LICENSE"), "."),
     (str(REPO_ROOT / "NOTICE.md"), "."),
     (str(REPO_ROOT / "README.md"), "."),
+    # Qt and PySide6 ship inside this bundle under the LGPL-3.0, and section
+    # 4(b) asks that a copy of that licence travel with the combined work --
+    # linking to it is not the same as supplying it. RELINKING.md goes in for
+    # the same reason: it is the section 4(d) procedure, and the About box
+    # tells the reader to go and read it, so it has to be there to read.
+    (str(REPO_ROOT / "LICENSES" / "LGPL-3.0.txt"), "LICENSES"),
+    (str(REPO_ROOT / "docs" / "RELINKING.md"), "docs"),
 ]
 if ICON.exists():
     DATA_FILES.append((str(ICON), "clammac/resources"))

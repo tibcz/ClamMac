@@ -91,6 +91,61 @@ class TestCommandBuilding:
         command = self._command(settings, [Path("/a"), Path("/b")])
         assert command[-2:] == ["/a", "/b"]
 
+    def test_symlinks_off_still_scans_what_it_was_pointed_at(self, settings):
+        """"Do not follow symlinks" must not mean "refuse the target".
+
+        clamscan's --follow-*-symlinks takes 0 (follow none), 1 (follow only
+        what was named on the command line) or 2 (follow all). Zero also
+        rejects the path the user explicitly chose, so a symlinked folder
+        scans nothing and still reports success. On macOS that quietly costs
+        every quick scan its /tmp coverage, /tmp being a symlink to
+        /private/tmp. One is clamscan's own default and the right "off".
+        """
+        settings.scan.follow_directory_symlinks = False
+        settings.scan.follow_file_symlinks = False
+        command = self._command(settings)
+        assert "--follow-dir-symlinks=1" in command
+        assert "--follow-file-symlinks=1" in command
+        assert "--follow-dir-symlinks=0" not in command
+        assert "--follow-file-symlinks=0" not in command
+
+    def test_symlinks_on_follows_everything(self, settings):
+        settings.scan.follow_directory_symlinks = True
+        settings.scan.follow_file_symlinks = True
+        command = self._command(settings)
+        assert "--follow-dir-symlinks=2" in command
+        assert "--follow-file-symlinks=2" in command
+
+    def test_the_two_symlink_toggles_are_independent(self, settings):
+        settings.scan.follow_directory_symlinks = True
+        settings.scan.follow_file_symlinks = False
+        command = self._command(settings)
+        assert "--follow-dir-symlinks=2" in command
+        assert "--follow-file-symlinks=1" in command
+
+
+class TestSymlinkedTargets:
+    """The quick scan's own target list is what makes this matter."""
+
+    def test_quick_scan_targets_include_tmp(self):
+        """/tmp is a quick-scan target, and on macOS it is a symlink.
+
+        That pairing is what made the old ``=0`` mapping a real bug rather
+        than a theoretical one. If /tmp is ever dropped from the list, the
+        symlink flags deserve another look.
+        """
+        from clammac.core import paths
+
+        assert Path("/tmp") in paths.quick_scan_targets()
+
+    def test_a_symlinked_directory_target_is_not_excluded_by_the_flags(self, settings):
+        """A symlinked directory handed straight to clamscan must be scanned."""
+        settings.scan.follow_directory_symlinks = False
+        tools = engine.EngineTools(Path("/x"), Path("/x/clamscan"), Path("/x/freshclam"))
+        command = engine.build_scan_command(tools, [Path("/tmp")], settings)
+        assert command[-1] == "/tmp"
+        assert "--follow-dir-symlinks=1" in command
+
 
 class TestGeneratedConfigs:
     def test_freshclam_conf_points_at_our_database(self, tmp_path):

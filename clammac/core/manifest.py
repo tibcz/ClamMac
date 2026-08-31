@@ -5,11 +5,13 @@ ClamMac will not download a package it has no digest for. The digests live in
 bundle, so a fresh install can provision itself without first trusting anything
 fetched at runtime.
 
-A newer manifest can optionally be fetched from the ClamMac repository so that
-an old build can still install a current engine, but it is treated as a
+A newer manifest is fetched from the ClamMac repository when an engine is
+installed, so that an old build can still install a current engine rather than
+being frozen on whatever was pinned the day it was built. It is treated as a
 *suggestion*: it can only add releases, and every release it adds still has to
 carry a digest that the download is checked against. That check happens in
-``provisioner.py`` and is not optional.
+``provisioner.py`` and is not optional. Failing to reach it is not an error --
+the manifest that shipped with the application is still perfectly installable.
 """
 
 from __future__ import annotations
@@ -24,12 +26,28 @@ from . import paths
 
 __all__ = ["MANIFEST_UPDATE_URL", "EngineRelease", "Manifest", "load_manifest"]
 
-#: Where a newer manifest may be fetched from, if the user opts in.
+#: Where a newer manifest is fetched from when provisioning an engine.
 MANIFEST_UPDATE_URL = (
     "https://raw.githubusercontent.com/tibcz/ClamMac/main/clammac/resources/engine_manifest.json"
 )
 
 _RESOURCE_NAME = "engine_manifest.json"
+
+
+def _safe_filename(value: object) -> str:
+    """Reduce a manifest-supplied filename to a bare, harmless name.
+
+    The filename becomes a path under ClamMac's cache directory, and a
+    manifest can be fetched from the network. A name carrying ``..`` or a
+    directory separator would let a hostile or corrupted manifest steer that
+    write somewhere else entirely, before the digest check ever gets a chance
+    to reject the download. Only the final component is kept, and a name that
+    survives as nothing usable is rejected outright.
+    """
+    name = Path(str(value)).name.strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError(f"engine release has an unusable filename: {value!r}")
+    return name
 
 
 @dataclass(frozen=True)
@@ -70,7 +88,7 @@ class EngineRelease:
             raise ValueError(f"engine release {raw['version']} has a malformed sha256")
         return cls(
             version=str(raw["version"]),
-            filename=str(raw.get("filename") or Path(str(raw["url"])).name),
+            filename=_safe_filename(raw.get("filename") or Path(str(raw["url"])).name),
             url=str(raw["url"]),
             sha256=digest,
             size=int(raw.get("size") or 0),

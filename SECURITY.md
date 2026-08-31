@@ -38,7 +38,8 @@ new enough to have no signature will not be caught.
 is checked against a SHA-256 digest pinned in this repository before a single
 byte is unpacked, and only HTTPS sources are accepted. A downloaded manifest may
 add engine versions but can never redefine the digest of one that shipped with
-the application.
+the application, and the filename it supplies is reduced to a bare name so it
+cannot steer the download anywhere but ClamMac's own cache.
 
 **The package is parsed, not executed.** ClamMac reads the installer format
 itself rather than running Apple's installer, so the default path needs no
@@ -63,13 +64,22 @@ group- or world-writable.
 
 ## What ClamMac sends
 
-Nothing, to us. ClamMac has no telemetry, no analytics, and no update ping of
-its own.
+Nothing about you, to anyone.
 
-It makes exactly two kinds of outbound request, both to the ClamAV project:
+It makes three kinds of outbound request, and no others:
 
-- the engine installer package, once, during setup;
-- signature database updates, via `freshclam`.
+- the engine installer package, once, during setup — from the ClamAV project;
+- signature database updates, via `freshclam` — from the ClamAV project's
+  mirrors;
+- the engine manifest, from this repository on GitHub, when you set up or
+  reinstall the engine. This is how a build released a year ago can still
+  install a current ClamAV instead of being stuck on whatever was pinned the
+  day it was built. It is a plain file fetch: no identifier, no account, no
+  information about you or your machine, and nothing beyond the request itself
+  that GitHub would not see for any download.
+
+There is no telemetry, no analytics, and no periodic check-in. ClamMac never
+contacts anything on a timer, on launch, or in the background.
 
 Scan results, file names, file contents and detections stay on your machine.
 Nothing is uploaded when a threat is found.
