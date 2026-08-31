@@ -250,8 +250,17 @@ class TestScanJob:
 
         assert job.pause()
         assert job.state is JobState.PAUSED
+
+        # SIGSTOP stops the scanner, but ClamMac's reader thread may still be
+        # draining lines the child had already written into the pipe before
+        # the signal landed, so the count can tick up once or twice after the
+        # pause returns. Let that settle before taking the reading -- reading
+        # immediately races the pipe rather than testing the pause, which is
+        # what made this test fail about one run in fifteen.
+        time.sleep(0.3)
         held = job.scanned
         time.sleep(0.5)
+        # Half a second at ~100 files/sec: an unpaused scan would be far ahead.
         assert job.scanned == held  # genuinely stopped, not just slowed
 
         assert job.resume()
