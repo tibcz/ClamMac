@@ -77,7 +77,8 @@ def check_platform() -> None:
 
 def build_icon() -> Path:
     announce("Generating the application icon")
-    from packaging.make_icon import build as build_icns
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from make_icon import build as build_icns
 
     target = REPO_ROOT / "clammac" / "resources" / "ClamMac.icns"
     written = build_icns(target)

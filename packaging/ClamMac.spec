@@ -23,6 +23,8 @@ from pathlib import Path
 REPO_ROOT = Path(SPECPATH).parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from PyInstaller.utils.hooks import collect_submodules  # noqa: E402
+
 from clammac.version import APP_ID, APP_NAME, COPYRIGHT, VERSION  # noqa: E402
 
 ICON = REPO_ROOT / "clammac" / "resources" / "ClamMac.icns"
@@ -65,7 +67,16 @@ analysis = Analysis(
     pathex=[str(REPO_ROOT)],
     binaries=[],
     datas=DATA_FILES,
-    hiddenimports=["clammac", "clammac.ui", "clammac.core"],
+    # Collected explicitly rather than left to the import graph. Qt is only
+    # imported inside run_gui(), and the interface pages are reached through
+    # a tuple of classes, so a missed edge here shows up as a bundle that
+    # builds cleanly and then fails to start.
+    hiddenimports=[
+        *collect_submodules("clammac"),
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
