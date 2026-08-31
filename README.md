@@ -1,4 +1,4 @@
-<img width="360" height="360" alt="38ba4007-c0c2-4b3b-93c9-675da4e598c5" src="https://github.com/user-attachments/assets/7f70daab-aa63-4e7b-bfd1-e39ef971a7c0" />
+<img width="360" height="360" alt="img" src="https://github.com/user-attachments/assets/c3990f80-a161-4fd0-a29b-01d8abed12a8" />
 
 # ClamMac
 
