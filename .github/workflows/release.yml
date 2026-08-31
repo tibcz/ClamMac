@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (leave empty to build the current commit)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build the disk image
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # The python.org installer is a genuine universal2 build, which is what
+      # lets PyInstaller emit a single bundle that runs on both Apple silicon
+      # and Intel. A runner-native Python would produce an arm64-only app.
+      - name: Install universal2 Python
+        run: |
+          set -euo pipefail
+          VERSION=3.12.7
+          curl -fsSL -o python.pkg \
+            "https://www.python.org/ftp/python/${VERSION}/python-${VERSION}-macos11.pkg"
+          sudo installer -pkg python.pkg -target /
+          PYBIN="/Library/Frameworks/Python.framework/Versions/3.12/bin"
+          echo "$PYBIN" >> "$GITHUB_PATH"
+          "$PYBIN/python3" -c "import sysconfig; print('platform:', sysconfig.get_platform())"
+          file "$PYBIN/python3"
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip wheel
+          python3 -m pip install -r requirements-dev.txt
+
+      - name: Test before building
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python3 -m pytest -q
+
+      - name: Build ClamMac.app and ClamMac.dmg
+        env:
+          # Both optional. When unset the bundle is signed ad hoc and the
+          # release notes explain the first-launch step to users.
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+          NOTARY_PROFILE: ${{ secrets.NOTARY_PROFILE }}
+        run: python3 packaging/build_app.py
+
+      - name: Record what was built
+        run: |
+          set -euo pipefail
+          cd dist
+          for f in *.dmg; do
+            echo "### $f"
+            echo "size:   $(du -h "$f" | cut -f1)"
+            echo "sha256: $(shasum -a 256 "$f" | cut -d' ' -f1)"
+          done
+          echo "### bundle architectures"
+          lipo -info "ClamMac.app/Contents/MacOS/ClamMac" || true
+          echo "### signature"
+          codesign -dv --verbose=2 "ClamMac.app" 2>&1 | head -20 || true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          shasum -a 256 *.dmg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClamMac-dmg
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS.txt
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/SHA256SUMS.txt
+          draft: false
+          generate_release_notes: true
+          body: |
+            ## Installing
+
+            Download the `.dmg`, open it, and drag **ClamMac** into
+            **Applications**.
+
+            **The first launch needs one extra step.** This build is not signed
+            with an Apple Developer ID, so macOS refuses to open it the first
+            time — that is Gatekeeper's default for every unsigned app, not a
+            judgement about this one. Right-click ClamMac in Applications,
+            choose **Open**, then click **Open** in the dialog. After that it
+            opens normally.
+
+            ## What happens on first run
+
+            ClamMac does not include the ClamAV engine. On first launch it
+            offers to download the official ClamAV package published by the
+            ClamAV project, verifies it against a SHA-256 digest built into
+            ClamMac, and unpacks it into ClamMac's own folder in your home
+            directory. **This does not ask for your password** and installs
+            nothing system-wide. If you already have ClamAV from Homebrew,
+            MacPorts, or the official installer, ClamMac finds it instead.
+
+            ## Verifying your download
+
+            `SHA256SUMS.txt` is attached. Check it with:
+
+            ```sh
+            shasum -a 256 -c SHA256SUMS.txt
+            ```
+
+            ---
+
+            ClamMac is an independent project, not affiliated with or endorsed
+            by Cisco Systems, Inc. ClamAV is a registered trademark of Cisco
+            Systems, Inc.

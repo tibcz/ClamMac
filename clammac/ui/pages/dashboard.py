@@ -122,7 +122,7 @@ class DashboardPage(Page):
             ("Real-time protection", "Scanning engine", "Virus definitions", "Database size")
         ):
             self.detail_grid.addWidget(label(name, tone="muted"), index, 0)
-            value = label("—")
+            value = label("—", wrap=True)
             self._detail_values[name] = value
             self.detail_grid.addWidget(value, index, 1)
         self.add(detail)

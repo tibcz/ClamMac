@@ -42,15 +42,19 @@ class Page(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        outer.addWidget(scroll)
+        # Kept as attributes so the layout tests can compare what the content
+        # needs against what the viewport actually offers. Horizontal scrolling
+        # is off by design -- a page that needs it has a layout bug, and the
+        # symptom is silently clipped content rather than a scrollbar.
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(self.scroll)
 
-        container = QWidget()
-        scroll.setWidget(container)
+        self.container = QWidget()
+        self.scroll.setWidget(self.container)
 
-        self.column = QVBoxLayout(container)
+        self.column = QVBoxLayout(self.container)
         self.column.setContentsMargins(
             Metrics.PAGE_MARGIN, Metrics.PAGE_MARGIN, Metrics.PAGE_MARGIN, Metrics.PAGE_MARGIN
         )
@@ -93,6 +97,13 @@ class Page(QWidget):
 
     def add_layout(self, layout) -> None:
         self.column.addLayout(layout)
+
+    def content_width_required(self) -> int:
+        """The narrowest this page's content can be drawn without clipping."""
+        return self.container.minimumSizeHint().width()
+
+    def content_width_available(self) -> int:
+        return self.scroll.viewport().width()
 
     def header_action(self, widget: QWidget) -> QWidget:
         """Put a control on the right-hand side of the page heading."""

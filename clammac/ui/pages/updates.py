@@ -65,7 +65,9 @@ class UpdatesPage(Page):
             ("Version", "Last updated", "Next scheduled update", "Files", "Total size", "Location")
         ):
             grid.addWidget(label(name, tone="muted"), index, 0)
-            value = label("—")
+            # These carry filesystem paths, which are long and unpredictable;
+            # without wrapping they widen the page past the window.
+            value = label("—", wrap=True)
             self._values[name] = value
             grid.addWidget(value, index, 1)
         detail.add_layout(grid)

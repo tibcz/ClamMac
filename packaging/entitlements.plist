@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      ClamMac ships a Python interpreter, so the hardened runtime needs to be
+      told that JIT-less dynamic code loading and unsigned bundled libraries
+      are expected. Without these the interpreter cannot import its own
+      extension modules and the app will not launch at all.
+    -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!--
+      The engine provisioner downloads the official ClamAV package and
+      freshclam fetches signature databases, both over HTTPS.
+    -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!--
+      Scanning means reading files the user chose, anywhere on the disk. This
+      is the whole purpose of the application; macOS still gates the protected
+      folders behind a TCC prompt, which is the right place for that decision.
+    -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!--
+      Used only when the user opts into a system-wide engine install, which
+      goes through Apple's own installer and its authentication dialog.
+    -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>
