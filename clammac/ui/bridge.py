@@ -31,6 +31,10 @@ class ServiceBridge(QObject):
     updateFinished = Signal(object)  # UpdateJob
     updateLog = Signal(str)
 
+    # Network audit
+    auditProgress = Signal(object)  # network.AuditProgress
+    auditFinished = Signal(object)  # network.NetworkAudit
+
     # Engine provisioning
     provisionProgress = Signal(object)  # provisioner.Progress
     provisionFinished = Signal(bool, str)  # success, message

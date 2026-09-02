@@ -25,6 +25,7 @@ __all__ = [
     "Exclusions",
     "Frequency",
     "InterfaceSettings",
+    "NetworkSettings",
     "ProtectionSettings",
     "ScanDepth",
     "ScanSettings",
@@ -223,6 +224,26 @@ class ScheduleSettings:
 
 
 @dataclass
+class NetworkSettings:
+    """The on-device network audit.
+
+    Everything here is off by default that would leave the machine. The audit
+    reads local configuration only; ``include_connections`` adds the list of
+    connections already established by other applications, which is still an
+    observation rather than a probe.
+    """
+
+    audit_on_launch: bool = False
+    include_connections: bool = True
+    check_wireless: bool = True
+    command_timeout: float = 8.0
+    #: How long an audit result is treated as current, for the reminder.
+    stale_after_days: int = 14
+    #: Ports the user has decided not to hear about again.
+    ignored_ports: list[int] = field(default_factory=list)
+
+
+@dataclass
 class InterfaceSettings:
     theme: Theme = Theme.SYSTEM
     show_menu_bar_item: bool = True
@@ -264,6 +285,7 @@ class Settings:
     protection: ProtectionSettings = field(default_factory=ProtectionSettings)
     updates: UpdateSettings = field(default_factory=UpdateSettings)
     schedule: ScheduleSettings = field(default_factory=ScheduleSettings)
+    network: NetworkSettings = field(default_factory=NetworkSettings)
     interface: InterfaceSettings = field(default_factory=InterfaceSettings)
     exclusions: Exclusions = field(default_factory=Exclusions)
     engine_path: str = ""

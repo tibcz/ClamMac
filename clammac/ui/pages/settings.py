@@ -48,6 +48,7 @@ class SettingsPage(Page):
         self._loading = False
         self._build_scanning()
         self._build_exclusions()
+        self._build_network()
         self._build_appearance()
         self._build_engine()
         self._build_about()
@@ -174,6 +175,54 @@ class SettingsPage(Page):
         )
         self.add(card)
 
+    # -- network audit ----------------------------------------------------
+
+    def _build_network(self) -> None:
+        card = Card()
+        card.add(heading("Network audit"))
+        card.add(
+            caption(
+                "The audit reads this Mac's own configuration and nothing else. It sends "
+                "no packets to other devices and looks nothing up on the internet, so it "
+                "is safe to run on any network, including one you do not own."
+            )
+        )
+
+        self.audit_launch_check = QCheckBox("Run an audit each time ClamMac starts")
+        self.audit_connections_check = QCheckBox(
+            "Include the connections other applications already have open"
+        )
+        self.audit_wireless_check = QCheckBox("Check which Wi-Fi network you are on")
+        for widget in (
+            self.audit_launch_check,
+            self.audit_connections_check,
+            self.audit_wireless_check,
+        ):
+            widget.toggled.connect(self._save)
+            card.add(widget)
+
+        card.add(Separator())
+        self.ignored_ports_field = QLineEdit()
+        self.ignored_ports_field.setPlaceholderText("8080, 5000")
+        self.ignored_ports_field.editingFinished.connect(self._save)
+        card.add(
+            SettingRow(
+                "Ports to leave out of the audit",
+                self.ignored_ports_field,
+                hint="Comma separated. Every port listed here stops being reported, so "
+                "keep the list short.",
+            )
+        )
+
+        row = QHBoxLayout()
+        row.setSpacing(Metrics.GAP)
+        row.addWidget(
+            button("Run an audit now", on_click=self.window.run_network_audit)
+        )
+        row.addStretch(1)
+        card.add_layout(row)
+        self.add(card)
+
     # -- appearance and behaviour ----------------------------------------
 
     def _build_appearance(self) -> None:
@@ -282,6 +331,14 @@ class SettingsPage(Page):
             self.exclusion_list.addItem(QListWidgetItem(entry))
         self.extension_field.setText(", ".join(settings.exclusions.extensions))
 
+        network = settings.network
+        self.audit_launch_check.setChecked(network.audit_on_launch)
+        self.audit_connections_check.setChecked(network.include_connections)
+        self.audit_wireless_check.setChecked(network.check_wireless)
+        self.ignored_ports_field.setText(
+            ", ".join(str(port) for port in network.ignored_ports)
+        )
+
         self.theme_box.setCurrentIndex(max(0, self.theme_box.findData(interface.theme.value)))
         self.menu_bar_check.setChecked(interface.show_menu_bar_item)
         self.launch_check.setChecked(interface.launch_at_login)
@@ -318,6 +375,12 @@ class SettingsPage(Page):
             for part in self.extension_field.text().split(",")
             if part.strip()
         ]
+
+        network = settings.network
+        network.audit_on_launch = self.audit_launch_check.isChecked()
+        network.include_connections = self.audit_connections_check.isChecked()
+        network.check_wireless = self.audit_wireless_check.isChecked()
+        network.ignored_ports = _ports(self.ignored_ports_field.text())
 
         interface.show_menu_bar_item = self.menu_bar_check.isChecked()
         interface.launch_at_login = self.launch_check.isChecked()
@@ -441,6 +504,16 @@ class SettingsPage(Page):
                 "Nothing is excluded. Every exclusion is somewhere malware could hide, so "
                 "add them sparingly."
             )
+
+
+def _ports(text: str) -> list[int]:
+    """Read a comma-separated port list, ignoring anything that is not one."""
+    found: list[int] = []
+    for part in text.split(","):
+        candidate = part.strip()
+        if candidate.isdigit() and 0 < int(candidate) < 65536 and int(candidate) not in found:
+            found.append(int(candidate))
+    return found
 
 
 def _spin(minimum: int, maximum: int, suffix: str) -> QSpinBox:

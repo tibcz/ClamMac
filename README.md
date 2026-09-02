@@ -9,6 +9,10 @@ own: a real interface, always-on folder monitoring, a safe quarantine, unattende
 scheduled scans, automatic signature updates, and a readable history of what was
 scanned and what was found.
 
+It also audits what your Mac exposes to the network — open ports, the firewall,
+sharing services, DNS, Wi-Fi — because a great deal now arrives over a port
+rather than as a file, and a signature scanner will never see it.
+
 > **ClamMac is an independent project.** It is not affiliated with, endorsed by,
 > or derived from Cisco Systems, Inc., the ClamAV project, or any other
 > antivirus product. ClamAV® is a registered trademark of Cisco Systems, Inc.
@@ -74,6 +78,25 @@ ClamAV project's mirrors.
 - Pause, resume, and stop
 - Runs at low priority by default, so a full scan does not make the machine
   unusable
+
+**Network audit**
+- A read-only look at what this Mac offers the network: every listening port,
+  which process opened it, and whether it answers this Mac only, the local
+  network, or everything
+- Recognises around ninety services by port and process, so a finding reads
+  "Ollama, with no authentication" rather than "port 11434"
+- Covers the local AI tooling that defaults to binding every interface —
+  Ollama, LM Studio, ComfyUI, Gradio web UIs, Jupyter, Ray — along with
+  databases, container APIs and development servers
+- Checks the firewall, stealth mode, sharing services, remote-access and
+  tunnelling agents, DNS resolvers, `/etc/hosts` overrides, proxies, Wi-Fi
+  encryption, public addressing, and the ARP table for signs of spoofing
+- Scores the result out of 100 and explains every finding: what it is, why it
+  matters, and the specific change that fixes it
+- Exports as HTML, CSV or JSON
+- **Reads local configuration only.** It sends no packet to any other device,
+  looks nothing up on the internet, and changes no setting. See
+  [`docs/NETWORK-AUDIT.md`](docs/NETWORK-AUDIT.md)
 
 **Real-time protection**
 - Watches Downloads, Desktop, removable volumes, and anything else you add
@@ -145,6 +168,10 @@ What neither ClamMac nor ClamAV does is behavioural detection, exploit
 mitigation, or reputation scoring. A brand-new threat with no signature will not
 be caught until a signature exists for it. Keep macOS updated, keep FileVault
 on, and treat ClamMac as one useful layer rather than the whole defence.
+
+The network audit covers a gap that signature scanning cannot reach — a service
+left listening on every interface is not a file — but it is an audit, not a
+defence. It tells you what is exposed; closing it is still your move.
 
 ## Contributing
 

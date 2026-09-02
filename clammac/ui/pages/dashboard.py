@@ -20,6 +20,7 @@ from ..widgets.common import (
     Card,
     Separator,
     StatCard,
+    badge,
     button,
     caption,
     heading,
@@ -108,6 +109,28 @@ class DashboardPage(Page):
         row.addStretch(1)
         actions.add_layout(row)
         self.add(actions)
+
+        # -- network exposure -----------------------------------------
+        network = Card()
+        network_header = QHBoxLayout()
+        network_header.setSpacing(Metrics.GAP)
+        network_header.addWidget(heading("Network exposure"))
+        self.network_badge = badge("Never audited", "muted")
+        network_header.addWidget(self.network_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        network_header.addStretch(1)
+        self.network_button = button(
+            "Run network audit", on_click=self.window.run_network_audit
+        )
+        network_header.addWidget(self.network_button)
+        network.add_layout(network_header)
+        self.network_detail = caption(
+            "Antivirus catches what arrives as a file. A great deal now arrives over a "
+            "port instead — a local model server, a database, a development server left "
+            "listening on every interface. The audit checks what this Mac is offering to "
+            "the network, and changes nothing."
+        )
+        network.add(self.network_detail)
+        self.add(network)
 
         # -- engine and protection detail -----------------------------
         detail = Card()
@@ -199,6 +222,8 @@ class DashboardPage(Page):
             f"{status.threats_total:,}", "danger" if status.threats_total else "good"
         )
 
+        self._refresh_network(status)
+
         # detail grid
         realtime = status.realtime
         realtime_text = realtime.label
@@ -225,6 +250,42 @@ class DashboardPage(Page):
 
         self._refresh_activity()
 
+    def _refresh_network(self, status: ProtectionStatus) -> None:
+        audit = status.last_network_audit
+        if audit is None:
+            self.network_badge.setText("Never audited")
+            self.network_badge.setProperty("tone", "muted")
+            self.network_button.setText("Run network audit")
+            self.network_detail.setText(
+                "Antivirus catches what arrives as a file. A great deal now arrives over "
+                "a port instead — a local model server, a database, a development server "
+                "left listening on every interface. The audit checks what this Mac is "
+                "offering to the network, and changes nothing."
+            )
+        else:
+            tone = (
+                "danger"
+                if audit.critical
+                else "warn"
+                if audit.high or audit.medium
+                else "good"
+            )
+            self.network_badge.setText(f"{audit.grade} — {audit.score}/100")
+            self.network_badge.setProperty("tone", tone)
+            self.network_button.setText("Run again")
+            summary = (
+                f"{audit.exposed} of {audit.listening} listening ports were reachable "
+                f"from the network when this Mac was audited "
+                f"{relative_time(audit.started).lower()}."
+            )
+            if audit.serious:
+                summary += (
+                    f" {audit.serious} finding{'s' if audit.serious != 1 else ''} "
+                    "need attention — open Network for the detail."
+                )
+            self.network_detail.setText(summary)
+        _repolish(self.network_badge)
+
     def _configure_hero_action(self, status: ProtectionStatus) -> None:
         """The hero button always does the most useful next thing."""
         if self._hero_connection is not None:
@@ -248,6 +309,10 @@ class DashboardPage(Page):
             item = self.activity_body.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # Unparent before deleting: deleteLater only schedules the
+                # deletion, and until the event loop gets to it the old row
+                # goes on painting where it was, over the new one.
+                widget.setParent(None)
                 widget.deleteLater()
 
         scans = self.service.history.scans(limit=6)

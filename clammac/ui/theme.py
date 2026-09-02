@@ -197,6 +197,17 @@ QLabel[tone="warn"]     {{ color: {p.warn}; }}
 QLabel[tone="danger"]   {{ color: {p.danger}; }}
 QLabel[tone="muted"]    {{ color: {p.text_muted}; }}
 
+/* A severity pill. Small, high-contrast, and readable next to a heading. */
+QLabel[role="badge"] {{
+    background: {p.surface_hover}; color: {p.text_muted};
+    border-radius: 8px; padding: 2px 9px; font-size: 11px; font-weight: 600;
+}}
+QLabel[role="badge"][tone="danger"] {{ background: {p.danger_soft}; color: {p.danger}; }}
+QLabel[role="badge"][tone="warn"]   {{ background: {p.warn_soft};   color: {p.warn}; }}
+QLabel[role="badge"][tone="good"]   {{ background: {p.good_soft};   color: {p.good}; }}
+QLabel[role="badge"][tone="accent"] {{ background: {p.sidebar_selected}; color: {p.accent}; }}
+QLabel[role="grade"]    {{ font-size: 46px; font-weight: 700; }}
+
 /* ---------- cards ---------- */
 QFrame[role="card"] {{
     background: {p.surface};

@@ -20,8 +20,9 @@ from . import eicar, freshclam, launchagent, paths, scheduler
 from . import engine as engine_module
 from .clamd import ClamdDaemon, ClamdError
 from .config import Settings, ThreatAction
-from .history import History, ScanRecord
+from .history import History, NetworkAuditRecord, ScanRecord
 from .log import get_logger
+from .network import NetworkAudit, Severity
 from .notifications import notifier
 from .quarantine import Quarantine, QuarantineError
 from .scanner import FileResult, FileStatus, ScanJob, ScanKind
@@ -66,6 +67,7 @@ class ProtectionStatus:
     quarantine_count: int = 0
     last_scan: ScanRecord | None = None
     threats_total: int = 0
+    last_network_audit: NetworkAuditRecord | None = None
 
     @property
     def has_engine(self) -> bool:
@@ -87,6 +89,7 @@ class AppService:
 
         self.active_scan: ScanJob | None = None
         self.active_update: freshclam.UpdateJob | None = None
+        self.active_audit: NetworkAudit | None = None
 
         self._lock = threading.RLock()
         self._status_listeners: list[Callable[[ProtectionStatus], None]] = []
@@ -124,6 +127,7 @@ class AppService:
         stale = database.is_stale(self.settings.updates.stale_after_days)
         last = self.history.last_scan()
         stats = self.history.statistics()
+        audit = self.history.last_network_audit()
         watcher_state = self.watcher.state if self.watcher else WatcherState.STOPPED
         watcher_detail = self.watcher.detail if self.watcher else ""
 
@@ -157,6 +161,29 @@ class AppService:
                 if health is Health.PROTECTED:
                     health = Health.ATTENTION
 
+        # The network audit runs without an engine, so its findings are folded
+        # in here rather than inside the branch above. It is only allowed to
+        # speak once the user has actually run one: nagging every existing
+        # installation into "needs attention" the moment it updates would be
+        # rude, and would train people to ignore the word. It raises ATTENTION
+        # and never AT_RISK, because "Not protected" is a statement about the
+        # scanner and saying it over a network finding would be a lie.
+        if audit is not None and audit.critical:
+            if health is Health.PROTECTED:
+                health = Health.ATTENTION
+            reasons.insert(
+                0,
+                f"{audit.critical} service"
+                f"{'s are' if audit.critical != 1 else ' is'} exposed to the network.",
+            )
+        elif audit is not None and audit.high:
+            if health is Health.PROTECTED:
+                health = Health.ATTENTION
+            reasons.append(
+                f"The network audit found {audit.high} thing"
+                f"{'s' if audit.high != 1 else ''} worth fixing."
+            )
+
         return ProtectionStatus(
             health=health,
             reasons=reasons,
@@ -170,6 +197,7 @@ class AppService:
             quarantine_count=self.quarantine.count(),
             last_scan=last,
             threats_total=stats["threats_total"],
+            last_network_audit=audit,
         )
 
     def add_status_listener(self, callback: Callable[[ProtectionStatus], None]) -> None:
@@ -361,6 +389,63 @@ class AppService:
             job.start()
         return job
 
+    # -- network audit ----------------------------------------------------
+
+    def start_network_audit(self, *, on_progress=None, on_finished=None) -> NetworkAudit:
+        """Examine what this Mac exposes to the network.
+
+        Needs no engine and no definitions: it reads the machine's own
+        configuration, so it works before ClamAV has ever been installed.
+        """
+        with self._lock:
+            if self.active_audit is not None and self.active_audit.state.is_active:
+                raise RuntimeError("A network audit is already running.")
+
+            audit = NetworkAudit(self.settings.network, on_progress=on_progress)
+
+            def finished(job: NetworkAudit) -> None:
+                try:
+                    self._handle_audit_finished(job)
+                finally:
+                    if on_finished is not None:
+                        on_finished(job)
+                    with self._lock:
+                        if self.active_audit is job:
+                            self.active_audit = None
+                    self.notify_status()
+
+            audit.on_finished = finished
+            self.active_audit = audit
+            audit.start()
+            return audit
+
+    def _handle_audit_finished(self, job: NetworkAudit) -> None:
+        report = job.report
+        if report is None:
+            return
+        try:
+            self.history.record_network_audit(report)
+        except Exception:
+            log.exception("could not record the network audit")
+
+        counts = report.counts
+        serious = counts[Severity.CRITICAL] + counts[Severity.HIGH]
+        self.history.record_event(
+            "network",
+            f"Network audit scored {report.score}/100 with {serious} serious "
+            f"finding{'s' if serious != 1 else ''}.",
+            "error" if counts[Severity.CRITICAL] else "info",
+        )
+        if counts[Severity.CRITICAL] and self.settings.interface.notifications:
+            worst = next(f for f in report.ordered if f.severity is Severity.CRITICAL)
+            notifier.threat("Network exposure found", worst.title)
+
+    def stop_network_audit(self) -> None:
+        with self._lock:
+            audit = self.active_audit
+        if audit is not None:
+            audit.cancel()
+
     # -- real-time protection --------------------------------------------
 
     def start_protection(self) -> bool:
@@ -444,6 +529,10 @@ class AppService:
         """Stop everything cleanly."""
         try:
             self.stop_scan()
+        except Exception:
+            pass
+        try:
+            self.stop_network_audit()
         except Exception:
             pass
         try:

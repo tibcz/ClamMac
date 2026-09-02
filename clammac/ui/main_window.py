@@ -36,6 +36,7 @@ from .bridge import ServiceBridge
 from .icons import glyph
 from .pages.dashboard import DashboardPage
 from .pages.history import HistoryPage
+from .pages.network import NetworkPage
 from .pages.protection import ProtectionPage
 from .pages.quarantine import QuarantinePage
 from .pages.scan import ScanPage
@@ -52,6 +53,7 @@ _PAGE_CLASSES = (
     DashboardPage,
     ScanPage,
     ProtectionPage,
+    NetworkPage,
     QuarantinePage,
     UpdatesPage,
     SchedulePage,
@@ -156,6 +158,12 @@ class MainWindow(QMainWindow):
         scan_menu.addAction(stop)
 
         tools = menubar.addMenu("&Tools")
+        audit = QAction("Run &Network Audit", self)
+        audit.setShortcut(QKeySequence("Ctrl+3"))
+        audit.triggered.connect(self.run_network_audit)
+        tools.addAction(audit)
+
+        tools.addSeparator()
         update = QAction("&Update Definitions", self)
         update.setShortcut(QKeySequence("Ctrl+U"))
         update.triggered.connect(self.update_definitions)
@@ -319,6 +327,28 @@ class MainWindow(QMainWindow):
             on_finished=self.bridge.updateFinished.emit,
         )
         job.on_log = self.bridge.updateLog.emit
+
+    # -- network audit ----------------------------------------------------
+
+    def run_network_audit(self) -> None:
+        """Audit the machine's network exposure.
+
+        Deliberately does not require the engine: the audit reads the Mac's own
+        configuration, so it is useful on a fresh install before ClamAV has
+        even been downloaded.
+        """
+        page = self._page(NetworkPage)
+        try:
+            self.service.start_network_audit(
+                on_progress=self.bridge.auditProgress.emit,
+                on_finished=self.bridge.auditFinished.emit,
+            )
+        except RuntimeError as exc:
+            QMessageBox.information(self, "Cannot start the audit", str(exc))
+            return
+        self.show_page(NetworkPage)
+        if page is not None:
+            page.audit_started()
 
     # -- protection -------------------------------------------------------
 

@@ -62,6 +62,14 @@ root, and nothing shared with other accounts.
 **Settings and history are not world-readable**, and nothing ClamMac writes is
 group- or world-writable.
 
+**The network audit only ever reads, and only ever reads this machine.** Every
+command it runs is a query against local configuration — sockets, firewall
+settings, interfaces, resolvers, the ARP table. It sends no packet to any other
+device, resolves no name, contacts nothing on the internet, and changes no
+setting. It is not a network scanner and cannot be pointed at one: there is no
+target to give it. It needs no administrator rights, and where a check would
+need them it says so in the report instead of guessing.
+
 ## What ClamMac sends
 
 Nothing about you, to anyone.
@@ -82,7 +90,9 @@ There is no telemetry, no analytics, and no periodic check-in. ClamMac never
 contacts anything on a timer, on launch, or in the background.
 
 Scan results, file names, file contents and detections stay on your machine.
-Nothing is uploaded when a threat is found.
+Nothing is uploaded when a threat is found. Network audits are the same: the
+report describes your machine's configuration, which is exactly the sort of
+thing you would not want sent anywhere, and it is not.
 
 ## Supported versions
 

@@ -52,8 +52,19 @@ def window(qt_app, engine_tools, monkeypatch):
 
 class TestConstruction:
     def test_every_page_is_present(self, window):
-        assert len(window.pages) == 8
+        assert len(window.pages) == 9
         assert window.sidebar.count() == len(window.pages)
+        assert [page.page_title for page in window.pages] == [
+            "Overview",
+            "Scan",
+            "Protection",
+            "Network",
+            "Quarantine",
+            "Definitions",
+            "Schedule",
+            "History",
+            "Settings",
+        ]
 
     def test_each_page_has_a_title_and_an_icon(self, window):
         for index, page in enumerate(window.pages):
@@ -64,6 +75,10 @@ class TestConstruction:
         titles = [a.text() for a in window.menuBar().actions()]
         assert "&Scan" in titles
         assert "&Tools" in titles
+
+    def test_the_tools_menu_offers_the_network_audit(self, window):
+        tools = next(a for a in window.menuBar().actions() if a.text() == "&Tools")
+        assert "Run &Network Audit" in [a.text() for a in tools.menu().actions()]
 
 
 class TestNavigation:
@@ -204,6 +219,143 @@ class TestScanFlow:
         assert page.table.rowCount() == 1
         assert page.table.item(0, 0).text() == "Test.Fake.Signature-1"
         assert window.service.quarantine.count() == 1
+
+
+class TestNetworkAudit:
+    """The audit page, driven the way the window drives it."""
+
+    def test_it_opens_before_any_audit_has_run(self, window, qt_app):
+        from clammac.ui.pages.network import NetworkPage
+
+        page = window._page(NetworkPage)
+        window.show_page(NetworkPage)
+        qt_app.processEvents()
+        assert page.report is None
+        assert "No audit" in page.hero_headline.text()
+        assert not page.export_button.isEnabled()
+
+    def test_a_full_audit_runs_through_the_window(self, window, qt_app):
+        import time
+
+        from clammac.ui.pages.network import NetworkPage
+
+        window.run_network_audit()
+        audit = window.service.active_audit
+        assert audit is not None
+        audit.wait(60)
+
+        deadline = time.monotonic() + 10
+        page = window._page(NetworkPage)
+        while time.monotonic() < deadline:
+            qt_app.processEvents()
+            if page.report is not None:
+                break
+            time.sleep(0.02)
+
+        assert page.report is not None
+        assert page.grade_label.text() in {"A", "B", "C", "D", "F"}
+        assert page.export_button.isEnabled()
+        assert page.ports_table.rowCount() == len(page.report.snapshot.listeners)
+        assert page.sharing_table.rowCount() == len(page.report.snapshot.sharing)
+
+    def test_the_result_is_recorded_and_shown_on_the_dashboard(self, window, qt_app):
+        from clammac.ui.pages.dashboard import DashboardPage
+
+        window.run_network_audit()
+        audit = window.service.active_audit
+        assert audit is not None
+        audit.wait(60)
+        for _ in range(20):
+            qt_app.processEvents()
+
+        record = window.service.history.last_network_audit()
+        assert record is not None
+        assert 0 <= record.score <= 100
+
+        dashboard = window._page(DashboardPage)
+        dashboard.refresh(window.service.status())
+        qt_app.processEvents()
+        assert "/100" in dashboard.network_badge.text()
+
+    def test_findings_do_not_draw_on_top_of_each_other(self, window, qt_app):
+        """Wrapped text sized as one line stacks findings on top of each other.
+
+        Two ways in: a height-for-width label put inside a plain container
+        widget rather than a nested layout, and a row removed from the layout
+        but left parented, which keeps painting where it was. Both are
+        invisible to every other test here and both make the page unreadable,
+        so the rectangles the labels actually occupy are compared directly.
+        """
+        from PySide6.QtWidgets import QLabel
+
+        from clammac.core.network import checks
+        from clammac.core.network.model import (
+            AuditReport,
+            FirewallState,
+            Listener,
+            Snapshot,
+        )
+        from clammac.ui.pages.network import NetworkPage
+
+        window.show()
+        window.resize(1120, 900)
+        page = window._page(NetworkPage)
+        window.show_page(NetworkPage)
+
+        snapshot = Snapshot(
+            hostname="test",
+            platform="macOS",
+            listeners=[
+                Listener(protocol="tcp", address="0.0.0.0", port=port, process="thing")
+                for port in (11434, 7860, 6379, 22, 5900)
+            ],
+            firewall=FirewallState(available=True, enabled=False),
+        )
+        snapshot.sharing = checks.derive_sharing(snapshot)
+        report = AuditReport(
+            audit_id="x",
+            started_at="2026-09-01T10:00:00+00:00",
+            snapshot=snapshot,
+            findings=checks.evaluate(snapshot),
+        )
+        assert len(report.findings) >= 5
+
+        page.report = report
+        # Twice: re-rendering is what a second audit, or a theme change, does,
+        # and a row that is only removed from the layout goes on painting where
+        # it was until the event loop gets round to deleting it.
+        for _ in range(2):
+            page._show_report(report)
+            for _ in range(10):
+                qt_app.processEvents()
+
+        boxes = []
+        for widget in page.findings_card.findChildren(QLabel):
+            if not widget.isVisible() or not widget.text().strip():
+                continue
+            rect = widget.rect().adjusted(1, 1, -1, -1)
+            if rect.width() <= 0 or rect.height() <= 0:
+                continue
+            boxes.append((rect.translated(widget.mapTo(page, rect.topLeft())), widget))
+        assert len(boxes) >= 15, "the findings did not render"
+
+        overlaps = [
+            f"{first.text()[:36]!r} over {second.text()[:36]!r}"
+            for index, (rect, first) in enumerate(boxes)
+            for other, second in boxes[index + 1 :]
+            if rect.intersects(other)
+        ]
+        assert not overlaps, "findings are drawn on top of each other: " + "; ".join(
+            overlaps[:5]
+        )
+
+    def test_exporting_without_a_report_does_not_crash(self, window, qt_app, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
+        from clammac.ui.pages.network import NetworkPage
+
+        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+        window._page(NetworkPage).export()
 
 
 class TestIcons:

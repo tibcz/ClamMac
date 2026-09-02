@@ -13,7 +13,7 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,7 +23,14 @@ from .log import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["DetectionRecord", "EventRecord", "History", "ScanRecord"]
+__all__ = [
+    "DetectionRecord",
+    "EventRecord",
+    "History",
+    "NetworkAuditRecord",
+    "NetworkFindingRecord",
+    "ScanRecord",
+]
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS scans (
@@ -61,7 +68,40 @@ CREATE TABLE IF NOT EXISTS events (
     message TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS net_audits (
+    id          TEXT PRIMARY KEY,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    duration    REAL NOT NULL DEFAULT 0,
+    score       INTEGER NOT NULL DEFAULT 0,
+    grade       TEXT NOT NULL DEFAULT '',
+    headline    TEXT NOT NULL DEFAULT '',
+    hostname    TEXT NOT NULL DEFAULT '',
+    platform    TEXT NOT NULL DEFAULT '',
+    listening   INTEGER NOT NULL DEFAULT 0,
+    exposed     INTEGER NOT NULL DEFAULT 0,
+    critical    INTEGER NOT NULL DEFAULT 0,
+    high        INTEGER NOT NULL DEFAULT 0,
+    medium      INTEGER NOT NULL DEFAULT 0,
+    low         INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS net_findings (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    audit_id       TEXT NOT NULL,
+    check_id       TEXT NOT NULL,
+    severity       TEXT NOT NULL,
+    category       TEXT NOT NULL,
+    title          TEXT NOT NULL DEFAULT '',
+    summary        TEXT NOT NULL DEFAULT '',
+    recommendation TEXT NOT NULL DEFAULT '',
+    evidence       TEXT NOT NULL DEFAULT '[]',
+    FOREIGN KEY (audit_id) REFERENCES net_audits (id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_scans_started    ON scans (started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_net_audit_when   ON net_audits (started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_net_find_audit   ON net_findings (audit_id);
 CREATE INDEX IF NOT EXISTS idx_detect_scan      ON detections (scan_id);
 CREATE INDEX IF NOT EXISTS idx_detect_when      ON detections (detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_when      ON events (at DESC);
@@ -122,6 +162,52 @@ class DetectionRecord:
     @property
     def name(self) -> str:
         return Path(self.path).name
+
+
+@dataclass
+class NetworkAuditRecord:
+    """The headline numbers from one network audit, kept for comparison."""
+
+    id: str
+    started_at: str
+    finished_at: str = ""
+    duration: float = 0.0
+    score: int = 0
+    grade: str = ""
+    headline: str = ""
+    hostname: str = ""
+    platform: str = ""
+    listening: int = 0
+    exposed: int = 0
+    critical: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+
+    @property
+    def started(self) -> datetime:
+        return _parse(self.started_at)
+
+    @property
+    def serious(self) -> int:
+        return self.critical + self.high
+
+    @property
+    def clean(self) -> bool:
+        return self.serious == 0
+
+
+@dataclass
+class NetworkFindingRecord:
+    id: int
+    audit_id: str
+    check_id: str
+    severity: str
+    category: str
+    title: str = ""
+    summary: str = ""
+    recommendation: str = ""
+    evidence: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -222,6 +308,67 @@ class History:
                 rows,
             )
 
+    def record_network_audit(self, report: Any) -> None:
+        """Store an audit's summary and its findings.
+
+        Duck-typed on purpose: ``history`` sits below the network package and
+        should not import it back.
+        """
+        counts = {severity.value: count for severity, count in report.counts.items()}
+        snapshot = report.snapshot
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO net_audits
+                   (id, started_at, finished_at, duration, score, grade, headline,
+                    hostname, platform, listening, exposed, critical, high, medium, low)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET
+                     finished_at=excluded.finished_at, duration=excluded.duration,
+                     score=excluded.score, grade=excluded.grade,
+                     headline=excluded.headline, listening=excluded.listening,
+                     exposed=excluded.exposed, critical=excluded.critical,
+                     high=excluded.high, medium=excluded.medium, low=excluded.low""",
+                (
+                    report.audit_id,
+                    report.started_at,
+                    report.finished_at,
+                    report.duration,
+                    report.score,
+                    report.grade,
+                    report.headline,
+                    snapshot.hostname,
+                    snapshot.platform,
+                    len(snapshot.listeners),
+                    len(snapshot.exposed_listeners),
+                    counts.get("critical", 0),
+                    counts.get("high", 0),
+                    counts.get("medium", 0),
+                    counts.get("low", 0),
+                ),
+            )
+            connection.execute(
+                "DELETE FROM net_findings WHERE audit_id = ?", (report.audit_id,)
+            )
+            connection.executemany(
+                """INSERT INTO net_findings
+                   (audit_id, check_id, severity, category, title, summary,
+                    recommendation, evidence)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                [
+                    (
+                        report.audit_id,
+                        finding.check_id,
+                        finding.severity.value,
+                        finding.category.value,
+                        finding.title,
+                        finding.summary,
+                        finding.recommendation,
+                        json.dumps(list(finding.evidence)),
+                    )
+                    for finding in report.ordered
+                ],
+            )
+
     def record_event(self, kind: str, message: str, level: str = "info") -> None:
         with self._connect() as connection:
             connection.execute(
@@ -279,6 +426,45 @@ class History:
             for r in rows
         ]
 
+    def network_audits(self, limit: int = 100) -> list[NetworkAuditRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM net_audits ORDER BY started_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [_audit_from_row(row) for row in rows]
+
+    def last_network_audit(self) -> NetworkAuditRecord | None:
+        found = self.network_audits(limit=1)
+        return found[0] if found else None
+
+    def network_findings(self, audit_id: str) -> list[NetworkFindingRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM net_findings WHERE audit_id = ? ORDER BY id", (audit_id,)
+            ).fetchall()
+        findings = []
+        for row in rows:
+            try:
+                evidence = json.loads(row["evidence"])
+            except (json.JSONDecodeError, TypeError):
+                evidence = []
+            findings.append(
+                NetworkFindingRecord(
+                    id=row["id"],
+                    audit_id=row["audit_id"],
+                    check_id=row["check_id"],
+                    severity=row["severity"],
+                    category=row["category"],
+                    title=row["title"],
+                    summary=row["summary"],
+                    recommendation=row["recommendation"],
+                    evidence=[str(item) for item in evidence]
+                    if isinstance(evidence, list)
+                    else [],
+                )
+            )
+        return findings
+
     def events(self, limit: int = 200, kind: str = "") -> list[EventRecord]:
         query = "SELECT * FROM events"
         params: list[Any] = []
@@ -327,13 +513,35 @@ class History:
             removed = connection.execute("DELETE FROM scans WHERE started_at < ?", (cutoff,)).rowcount
             connection.execute("DELETE FROM detections WHERE detected_at < ?", (cutoff,))
             connection.execute("DELETE FROM events WHERE at < ?", (cutoff,))
+            connection.execute("DELETE FROM net_audits WHERE started_at < ?", (cutoff,))
         return removed
 
     def clear(self) -> None:
         with self._connect() as connection:
             connection.executescript(
                 "DELETE FROM detections; DELETE FROM scans; DELETE FROM events;"
+                "DELETE FROM net_findings; DELETE FROM net_audits;"
             )
+
+
+def _audit_from_row(row: sqlite3.Row) -> NetworkAuditRecord:
+    return NetworkAuditRecord(
+        id=row["id"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"] or "",
+        duration=row["duration"],
+        score=row["score"],
+        grade=row["grade"],
+        headline=row["headline"],
+        hostname=row["hostname"],
+        platform=row["platform"],
+        listening=row["listening"],
+        exposed=row["exposed"],
+        critical=row["critical"],
+        high=row["high"],
+        medium=row["medium"],
+        low=row["low"],
+    )
 
 
 def _scan_from_row(row: sqlite3.Row) -> ScanRecord:

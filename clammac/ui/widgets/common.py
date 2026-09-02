@@ -34,6 +34,7 @@ __all__ = [
     "SettingRow",
     "Spinner",
     "StatCard",
+    "badge",
     "button",
     "caption",
     "configure_table",
@@ -43,6 +44,7 @@ __all__ = [
     "human_size",
     "label",
     "metric",
+    "mono",
     "relative_time",
     "subtitle",
     "title",
@@ -90,6 +92,19 @@ def caption(text: str = "", *, wrap: bool = True) -> QLabel:
 
 def metric(text: str = "", tone: str = "") -> QLabel:
     return label(text, role="metric", tone=tone)
+
+
+def badge(text: str = "", tone: str = "") -> QLabel:
+    """A small pill, for a severity or a status next to a heading."""
+    widget = label(text, role="badge", tone=tone)
+    widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    return widget
+
+
+def mono(text: str = "", *, wrap: bool = True) -> QLabel:
+    """Monospaced text, for addresses, ports and command output."""
+    return label(text, role="mono", wrap=wrap)
 
 
 # --------------------------------------------------------------------------

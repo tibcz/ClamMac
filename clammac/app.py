@@ -153,6 +153,9 @@ def run_gui(arguments: argparse.Namespace) -> int:
             ).due:
                 window.update_definitions()
 
+        if service.settings.network.audit_on_launch:
+            window.run_network_audit()
+
         if paths.is_macos():
             launchagent.sync_all(service.settings)
 

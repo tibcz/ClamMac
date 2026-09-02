@@ -29,6 +29,8 @@ NAMES = (
     "check",
     "warning",
     "cross",
+    "network",
+    "lock",
 )
 
 
@@ -131,6 +133,25 @@ def _draw(name: str, painter: QPainter, colour: QColor, size: float) -> None:
         painter.drawEllipse(QPointF(s * 0.5, s * 0.5), s * 0.32, s * 0.32)
         painter.drawLine(QPointF(s * 0.5, s * 0.46), QPointF(s * 0.5, s * 0.68))
         painter.drawPoint(QPointF(s * 0.5, s * 0.33))
+    elif name == "network":
+        # A globe: an outline with one meridian and two parallels. Reads as
+        # "the network" at 18px, which the more obvious node-and-edge diagram
+        # does not.
+        radius = s * 0.32
+        painter.drawEllipse(QPointF(s * 0.5, s * 0.5), radius, radius)
+        painter.drawEllipse(QPointF(s * 0.5, s * 0.5), radius * 0.45, radius)
+        painter.drawLine(QPointF(s * 0.18, s * 0.5), QPointF(s * 0.82, s * 0.5))
+        painter.drawArc(
+            QRectF(s * 0.18, s * 0.24, s * 0.64, s * 0.34), 200 * 16, 140 * 16
+        )
+        painter.drawArc(
+            QRectF(s * 0.18, s * 0.42, s * 0.64, s * 0.34), 20 * 16, 140 * 16
+        )
+    elif name == "lock":
+        painter.drawRoundedRect(
+            QRectF(s * 0.24, s * 0.46, s * 0.52, s * 0.34), s * 0.06, s * 0.06
+        )
+        painter.drawArc(QRectF(s * 0.34, s * 0.20, s * 0.32, s * 0.36), 0, 180 * 16)
     elif name == "warning":
         painter.drawPolyline(
             [QPointF(s * 0.5, s * 0.18), QPointF(s * 0.86, s * 0.80),
