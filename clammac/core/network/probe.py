@@ -322,6 +322,8 @@ def collect_sockets(*, timeout: float = DEFAULT_TIMEOUT) -> tuple[
             return _dedupe(listeners), connections, notes
 
     fallback = run(["netstat", "-an"], timeout=timeout)
+    if not fallback.usable:
+        fallback = run(["/usr/sbin/netstat", "-an"], timeout=timeout)
     if fallback.usable:
         listeners, connections = parse_netstat(fallback.stdout)
         notes.append(
@@ -455,9 +457,9 @@ def parse_scutil_dns(text: str) -> DnsConfig:
 
 def collect_dns(*, timeout: float = DEFAULT_TIMEOUT) -> DnsConfig:
     result = run(["scutil", "--dns"], timeout=timeout)
-    if result.usable:
-        return parse_scutil_dns(result.stdout)
-    return DnsConfig()
+    if not result.usable:
+        result = run(["/usr/sbin/scutil", "--dns"], timeout=timeout)
+    return parse_scutil_dns(result.stdout) if result.usable else DnsConfig()
 
 
 # --------------------------------------------------------------------------
@@ -553,6 +555,8 @@ def parse_routes(text: str) -> RouteInfo:
 
 def collect_route(*, timeout: float = DEFAULT_TIMEOUT) -> RouteInfo:
     result = run(["netstat", "-rn"], timeout=timeout)
+    if not result.usable:
+        result = run(["/usr/sbin/netstat", "-rn"], timeout=timeout)
     return parse_routes(result.stdout) if result.usable else RouteInfo()
 
 
@@ -645,10 +649,12 @@ def collect_wireless(*, timeout: float = DEFAULT_TIMEOUT) -> WirelessInfo:
     if not paths.is_macos():
         return WirelessInfo()
     # system_profiler is slow; it is worth its own, longer budget.
-    result = run(
-        ["system_profiler", "-detailLevel", "basic", "SPAirPortDataType"],
-        timeout=max(timeout, 20.0),
-    )
+    # A .app launched from the Finder gets a minimal PATH, so every tool that
+    # lives outside /usr/bin is tried by absolute path as well.
+    argv = ["-detailLevel", "basic", "SPAirPortDataType"]
+    result = run(["system_profiler", *argv], timeout=max(timeout, 20.0))
+    if not result.usable:
+        result = run(["/usr/sbin/system_profiler", *argv], timeout=max(timeout, 20.0))
     return parse_wireless(result.stdout) if result.usable else WirelessInfo()
 
 
@@ -686,6 +692,8 @@ def parse_proxy(text: str) -> ProxyConfig:
 
 def collect_proxy(*, timeout: float = DEFAULT_TIMEOUT) -> ProxyConfig:
     result = run(["scutil", "--proxy"], timeout=timeout)
+    if not result.usable:
+        result = run(["/usr/sbin/scutil", "--proxy"], timeout=timeout)
     return parse_proxy(result.stdout) if result.usable else ProxyConfig()
 
 
@@ -744,6 +752,8 @@ def collect_hosts_overrides() -> list[str]:
 def collect_processes(*, timeout: float = DEFAULT_TIMEOUT) -> list[str]:
     """Executable paths of everything running, for the agent checks."""
     result = run(["ps", "-axo", "comm="], timeout=timeout)
+    if not result.usable:
+        result = run(["/bin/ps", "-axo", "comm="], timeout=timeout)
     if not result.usable:
         return []
     names = []

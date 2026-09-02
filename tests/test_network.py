@@ -382,6 +382,14 @@ class TestCatalog:
         assert profile is not None
         assert "tunnel" in profile.tags
 
+    def test_port_5000_names_both_things_it_could_be(self):
+        """AirPlay Receiver and Flask share it, and the advice differs."""
+        profile = catalog.profile_for(5000)
+        assert profile is not None
+        assert "AirPlay" in profile.name
+        assert "127.0.0.1" in profile.guidance
+        assert catalog.profile_for(1900).name == "UPnP / SSDP"
+
     def test_an_unknown_port_has_no_profile(self):
         assert catalog.profile_for(45871) is None
 

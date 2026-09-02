@@ -424,7 +424,7 @@ _TABLE: tuple[tuple[tuple[int, ...], str, tuple[str, ...], Severity, str, str], 
         "Turn off NFS and other RPC services if you are not using them.",
     ),
     (
-        (1900, 5000),
+        (1900,),
         "UPnP / SSDP",
         ("infrastructure",),
         Severity.MEDIUM,
@@ -432,6 +432,19 @@ _TABLE: tuple[tuple[tuple[int, ...], str, tuple[str, ...], Severity, str, str], 
         "ports on their behalf, often without telling anyone.",
         "Confirm which application this is. Turning UPnP off at the router is "
         "worth doing regardless.",
+    ),
+    (
+        (5000,),
+        "AirPlay Receiver or a development server",
+        ("sharing", "dev"),
+        Severity.MEDIUM,
+        "Port 5000 is shared between macOS's own AirPlay Receiver, which lets "
+        "other devices send their screen to this Mac, and Flask's development "
+        "server, which has no authentication and is not built to face a "
+        "network. The process name says which this is.",
+        "If it is Control Center, turn off AirPlay Receiver in General > "
+        "AirDrop & Handoff. If it is a development server, bind it to "
+        "127.0.0.1 rather than 0.0.0.0.",
     ),
     (
         (1080, 3128, 8118),
