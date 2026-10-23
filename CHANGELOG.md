@@ -3,6 +3,18 @@
 All notable changes to ClamMac are recorded here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Crash when opening the menu bar menu on macOS 27.** On macOS 27 the system
+  can open a menu bar item's menu without a mouse event being current, and Qt's
+  tray-icon code (Qt 6.11 and earlier) read the click count of that event
+  unconditionally. AppKit raises an exception for that, the exception had
+  nowhere to go, and ClamMac aborted with `SIGABRT` in
+  `-[NSEvent clickCount]`. Qt 6.12 checks the event first, so ClamMac now
+  requires PySide6 6.12 or later. Builds made with older versions are affected;
+  rebuild the app to pick up the fix.
+
 ## [1.1.0] — 2026-09-02
 
 A second layer. ClamMac's scanner answers "is there something bad on this
