@@ -90,3 +90,41 @@ class TestAboutBoxPromises:
                 f"the About box tells the reader to read {relative}, "
                 "which does not exist"
             )
+
+
+class TestApplicationIcon:
+    """The icon is shipped artwork set into the macOS tile; check it all joins up."""
+
+    ART = REPO_ROOT / "clammac" / "resources" / "app-icon.png"
+
+    def test_the_artwork_is_in_the_repository(self):
+        assert self.ART.is_file()
+
+    def test_the_spec_ships_the_artwork(self):
+        assert "app-icon.png" in SPEC.read_text()
+
+    def test_the_icns_is_present_and_well_formed(self):
+        import struct
+
+        data = (REPO_ROOT / "clammac" / "resources" / "ClamMac.icns").read_bytes()
+        assert data[:4] == b"icns"
+        assert struct.unpack(">I", data[4:8])[0] == len(data)
+
+    @pytest.mark.parametrize("size", [16, 32, 128, 512, 1024])
+    def test_the_pixmap_is_a_masked_tile_at_every_size(self, size):
+        pytest.importorskip("PySide6")
+        from PySide6.QtGui import QGuiApplication
+
+        from clammac.ui.icons import app_icon_pixmap
+
+        QGuiApplication.instance() or QGuiApplication(["test"])
+        image = app_icon_pixmap(size).toImage()
+        assert image.width() == image.height() == size
+        # The corner is outside the tile, so transparent; the tile itself is opaque
+        # purple, and the stem of the white C crosses the middle row.
+        assert image.pixelColor(0, 0).alpha() == 0
+        middle = size // 2
+        tile = image.pixelColor(int(size * 0.20), middle)
+        assert tile.alpha() == 255 and tile.red() < 100
+        stem = image.pixelColor(int(size * 0.31), middle)
+        assert stem.alpha() == 255 and stem.red() > 150

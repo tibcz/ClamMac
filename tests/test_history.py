@@ -151,3 +151,104 @@ class TestEvents:
         history.record_event("quarantine", "file isolated", "warning")
         assert len(history.events()) == 2
         assert [e.message for e in history.events(kind="update")] == ["definitions updated"]
+
+
+class TestCrashJournal:
+    """A scan is written down as it happens, so a crash cannot take it with it."""
+
+    def test_a_begun_scan_is_visible_and_active(self, history):
+        history.begin_scan(_scan("s1", state="running", finished_at="", scanned=0))
+        stored = history.scan("s1")
+        assert stored.in_progress
+        assert stored.owner_pid > 0
+
+    def test_an_unfinished_scan_is_not_the_last_scan(self, history):
+        history.record_scan(_scan("done", started_at="2026-08-01T00:00:00+00:00"))
+        history.begin_scan(_scan("live", state="running", started_at="2026-08-30T00:00:00+00:00"))
+        assert history.last_scan().id == "done"
+
+    def test_checkpoints_update_counters(self, history):
+        history.begin_scan(_scan("s1", state="running", scanned=0))
+        history.checkpoint_scan(
+            "s1", state="running", scanned=500, infected=2, errors=1, duration=12.0
+        )
+        stored = history.scan("s1")
+        assert (stored.scanned, stored.infected, stored.errors) == (500, 2, 1)
+
+    def test_a_checkpoint_never_reopens_a_closed_scan(self, history):
+        history.record_scan(_scan("s1", state="completed", scanned=1200))
+        history.checkpoint_scan(
+            "s1", state="running", scanned=5, infected=0, errors=0, duration=1.0
+        )
+        assert history.scan("s1").state == "completed"
+        assert history.scan("s1").scanned == 1200
+
+    def test_a_scan_owned_by_a_dead_process_is_orphaned(self, history):
+        record = _scan("s1", state="running", owner_pid=2**22 + 12345)
+        history.record_scan(record)
+        assert [s.id for s in history.orphaned_scans()] == ["s1"]
+
+    def test_a_scan_owned_by_this_process_is_not_orphaned(self, history):
+        history.begin_scan(_scan("s1", state="running"))
+        assert history.orphaned_scans() == []
+
+    def test_a_scan_owned_by_a_live_process_is_not_orphaned(self, history):
+        import os
+
+        history.record_scan(_scan("s1", state="running", owner_pid=os.getppid()))
+        assert history.orphaned_scans() == []
+
+    def test_marking_interrupted_keeps_what_was_counted(self, history):
+        history.begin_scan(_scan("s1", state="running", scanned=0))
+        history.checkpoint_scan("s1", state="running", scanned=900, infected=0, errors=0, duration=30)
+        history.mark_interrupted("s1", infected=3)
+        stored = history.scan("s1")
+        assert stored.interrupted
+        assert stored.scanned == 900
+        assert stored.infected == 3
+        assert stored.finished_at
+        assert history.last_scan().id == "s1"
+
+    def test_a_detection_is_saved_before_anything_is_done_about_it(self, history):
+        history.begin_scan(_scan("s1", state="running"))
+        history.record_detection("s1", "/tmp/bad.exe", "Win.Trojan.X")
+        assert [d.action for d in history.pending_detections("s1")] == ["found"]
+
+    def test_settling_updates_rather_than_duplicates(self, history):
+        history.begin_scan(_scan("s1", state="running"))
+        history.record_detection("s1", "/tmp/bad.exe", "Win.Trojan.X")
+        history.settle_detection("s1", "/tmp/bad.exe", "Win.Trojan.X", "quarantine", "q1")
+        found = history.detections(scan_id="s1")
+        assert len(found) == 1
+        assert (found[0].action, found[0].quarantine_id) == ("quarantine", "q1")
+        assert history.pending_detections("s1") == []
+
+    def test_settling_a_detection_that_was_never_journaled_adds_it(self, history):
+        history.begin_scan(_scan("s1", state="running"))
+        history.settle_detection("s1", "/tmp/bad.exe", "Win.Trojan.X", "report")
+        assert len(history.detections(scan_id="s1")) == 1
+
+    def test_a_database_from_before_the_journal_is_upgraded(self, tmp_path):
+        import sqlite3
+
+        path = tmp_path / "old.sqlite3"
+        connection = sqlite3.connect(path)
+        connection.executescript(
+            """CREATE TABLE scans (
+                id TEXT PRIMARY KEY, kind TEXT NOT NULL, targets TEXT NOT NULL DEFAULT '[]',
+                started_at TEXT NOT NULL, finished_at TEXT, state TEXT NOT NULL,
+                scanned INTEGER NOT NULL DEFAULT 0, infected INTEGER NOT NULL DEFAULT 0,
+                errors INTEGER NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0,
+                engine_version TEXT NOT NULL DEFAULT '',
+                database_version INTEGER NOT NULL DEFAULT 0,
+                data_scanned_mb REAL NOT NULL DEFAULT 0);
+            INSERT INTO scans (id, kind, started_at, state) VALUES
+                ('old', 'quick', '2026-08-01T00:00:00+00:00', 'completed');"""
+        )
+        connection.commit()
+        connection.close()
+
+        upgraded = History(path)
+        assert upgraded.last_scan().id == "old"
+        upgraded.begin_scan(_scan("new", state="running"))
+        assert upgraded.scan("new").owner_pid > 0

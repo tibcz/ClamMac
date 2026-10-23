@@ -1,9 +1,11 @@
-"""Icons, drawn rather than shipped.
+"""Icons: the interface glyphs are drawn, the application icon is artwork.
 
 Every glyph here is built from primitives -- lines, arcs, rounded rectangles --
 written for this project. Nothing is traced from an existing icon set and no
 font outlines are embedded, which keeps ClamMac free of third-party artwork
-licensing and keeps the application bundle small.
+licensing and keeps the application bundle small. The one exception is the
+application icon itself, whose artwork is a single image set into the macOS
+tile by ``app_icon_pixmap``.
 
 Icons are drawn at request time in the current accent colour, so they follow
 the theme without needing a second set of assets for dark mode.
@@ -11,8 +13,15 @@ the theme without needing a second set of assets for dark mode.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterator
+from functools import lru_cache
+from pathlib import Path
+
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
+
+from ..core import paths
 
 __all__ = ["NAMES", "app_icon_pixmap", "glyph"]
 
@@ -177,52 +186,99 @@ def glyph(name: str, colour: str | QColor, size: int = 20) -> QIcon:
     return icon
 
 
-def app_icon_pixmap(size: int = 512, *, accent: str = "#2D6BE4", tint: str = "#5FD3A6") -> QPixmap:
-    """The application icon: a shield with a scan sweep across it.
+#: The artwork is the one thing here that is shipped rather than drawn: a
+#: full-bleed square, which ``app_icon_pixmap`` sets into the macOS icon tile.
+_ART_NAME = "app-icon.png"
 
-    Drawn from the same primitives as the interface glyphs so the icon and the
-    app look like they come from the same place. Deliberately unlike the
-    branding of ClamAV or any other antivirus product.
-    """
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
+#: macOS app icons occupy 824 of a 1024-point canvas; the rest is room for the
+#: shadow. The corner is a superellipse, the usual stand-in for Apple's
+#: continuous curve.
+_CANVAS = 1024
+_TILE = 824
+_SUPERELLIPSE = 5.0
+
+
+def _art_candidates() -> Iterator[Path]:
+    yield Path(__file__).resolve().parent.parent / "resources" / _ART_NAME
+    yield paths.bundle_dir() / "clammac" / "resources" / _ART_NAME
+    yield paths.bundle_dir() / "resources" / _ART_NAME
+
+
+def _tile_path(size: float = _TILE) -> QPainterPath:
+    centre = _CANVAS / 2
+    radius = size / 2
+    path = QPainterPath()
+    for degrees in range(361):
+        angle = math.radians(degrees)
+        cosine, sine = math.cos(angle), math.sin(angle)
+        point = QPointF(
+            centre + radius * math.copysign(abs(cosine) ** (2 / _SUPERELLIPSE), cosine),
+            centre + radius * math.copysign(abs(sine) ** (2 / _SUPERELLIPSE), sine),
+        )
+        if degrees == 0:
+            path.moveTo(point)
+        else:
+            path.lineTo(point)
+    path.closeSubpath()
+    return path
+
+
+@lru_cache(maxsize=1)
+def _app_icon_master() -> QImage:
+    """The icon at full size: artwork, tile mask, shadow and edge light."""
+    image = QImage(_CANVAS, _CANVAS, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+
+    art = QImage()
+    for candidate in _art_candidates():
+        if candidate.exists() and art.load(str(candidate)):
+            break
+    if art.isNull():
+        return image
+
+    painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-    from PySide6.QtGui import QLinearGradient
-
-    s = float(size)
-    shield = _shield_path(s * 0.14, s)
-
-    gradient = QLinearGradient(0, 0, 0, s)
-    gradient.setColorAt(0.0, QColor(accent).lighter(118))
-    gradient.setColorAt(1.0, QColor(accent).darker(122))
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(gradient)
-    painter.drawPath(shield)
 
-    # A lighter sweep across the upper half, clipped to the shield.
-    painter.setClipPath(shield)
-    sweep = QPainterPath()
-    sweep.moveTo(0, s * 0.46)
-    sweep.cubicTo(QPointF(s * 0.35, s * 0.32), QPointF(s * 0.65, s * 0.58), QPointF(s, s * 0.40))
-    sweep.lineTo(s, 0)
-    sweep.lineTo(0, 0)
-    sweep.closeSubpath()
-    painter.setBrush(QColor(255, 255, 255, 34))
-    painter.drawPath(sweep)
-    painter.setClipping(False)
+    tile = _tile_path()
 
-    # The check mark, in the accent tint.
-    pen = QPen(QColor(tint))
-    pen.setWidthF(s * 0.075)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    painter.setPen(pen)
+    # A soft shadow: many faint copies, nudged down, read as one blurred edge.
+    for step in range(24, 0, -1):
+        painter.setBrush(QColor(0, 0, 0, 3))
+        painter.save()
+        painter.translate(0, 10 + step * 0.6)
+        painter.drawPath(tile)
+        painter.restore()
+
+    painter.save()
+    painter.setClipPath(tile)
+    origin = (_CANVAS - _TILE) / 2
+    painter.drawImage(QRectF(origin, origin, _TILE, _TILE), art)
+    painter.restore()
+
+    edge = QPen(QColor(255, 255, 255, 40))
+    edge.setWidthF(3)
+    painter.setPen(edge)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPolyline(
-        [QPointF(s * 0.33, s * 0.50), QPointF(s * 0.45, s * 0.62), QPointF(s * 0.69, s * 0.38)]
-    )
-
+    painter.drawPath(tile)
     painter.end()
-    return pixmap
+    return image
+
+
+def app_icon_pixmap(size: int = 512) -> QPixmap:
+    """The application icon at ``size`` pixels square.
+
+    Used for the Dock, the window, the About box and the generated ``.icns``,
+    so they can never drift apart. Large masters are scaled down in one smooth
+    step, which is what keeps the 16 and 32 pixel renditions clean.
+    """
+    master = _app_icon_master()
+    if size != _CANVAS:
+        master = master.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+    return QPixmap.fromImage(master)

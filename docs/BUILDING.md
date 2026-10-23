@@ -50,8 +50,10 @@ CLAMMAC_HOME=/tmp/clammac-test python3 -m clammac
 
 `packaging/build_app.py` runs these in order:
 
-1. **Generate the icon.** `packaging/make_icon.py` draws it from primitives and
-   writes a multi-resolution `.icns`. No artwork files are stored in the repo.
+1. **Generate the icon.** `packaging/make_icon.py` sets the artwork in
+   `clammac/resources/app-icon.png` into the macOS icon tile and writes a
+   multi-resolution `.icns`. To change the icon, replace that PNG (a full-bleed
+   square, 1024 px or larger) and run `make icon`.
 2. **Run PyInstaller** against `packaging/ClamMac.spec`, which excludes the
    forty-odd Qt modules ClamMac never uses.
 3. **Check `Info.plist`** for the keys the app depends on — in particular the

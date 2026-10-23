@@ -179,3 +179,124 @@ class TestStatus:
         service.add_status_listener(seen.append)
         service.notify_status()
         assert len(seen) == 1
+
+
+class TestCrashRecovery:
+    """What the next launch does about a scan the last one never finished."""
+
+    def _orphan(self, service, sample_tree, *, found=("bad.exe",), scanned=700):
+        from clammac.core.history import ScanRecord
+
+        service.history.record_scan(
+            ScanRecord(
+                id="crashed",
+                kind="quick",
+                targets=[str(sample_tree)],
+                started_at="2026-08-30T10:00:00+00:00",
+                state="running",
+                scanned=scanned,
+                owner_pid=2**22 + 4321,
+            )
+        )
+        paths = []
+        for name in found:
+            victim = sample_tree / name
+            victim.write_text("not really malware")
+            service.history.record_detection("crashed", str(victim), "Win.Trojan.Test")
+            paths.append(victim)
+        return paths
+
+    def test_findings_and_progress_survive_a_crash(self, service, sample_tree):
+        self._orphan(service, sample_tree)
+        assert service.recover_interrupted_scans() == 1
+        record = service.history.scan("crashed")
+        assert record.interrupted
+        assert record.scanned == 700
+        assert record.infected == 1
+        assert len(service.history.detections(scan_id="crashed")) == 1
+
+    def test_the_configured_response_is_applied_to_what_was_found(self, service, sample_tree):
+        service.settings.scan.on_threat = ThreatAction.QUARANTINE
+        (victim,) = self._orphan(service, sample_tree)
+        service.recover_interrupted_scans()
+        assert not victim.exists()
+        assert service.quarantine.count() == 1
+        (detection,) = service.history.detections(scan_id="crashed")
+        assert detection.action == "quarantine"
+
+    def test_report_only_leaves_files_alone(self, service, sample_tree):
+        service.settings.scan.on_threat = ThreatAction.REPORT
+        (victim,) = self._orphan(service, sample_tree)
+        service.recover_interrupted_scans()
+        assert victim.exists()
+        assert service.history.detections(scan_id="crashed")[0].action == "report"
+
+    def test_a_file_that_has_gone_is_noted_not_failed(self, service, sample_tree):
+        (victim,) = self._orphan(service, sample_tree)
+        victim.unlink()
+        service.recover_interrupted_scans()
+        assert service.history.detections(scan_id="crashed")[0].action == "missing"
+
+    def test_the_user_is_told(self, service, sample_tree):
+        from clammac.core.notifications import notifier
+
+        sent = []
+        notifier.set_backend(lambda n: sent.append(n) or True)
+        try:
+            self._orphan(service, sample_tree)
+            service.recover_interrupted_scans()
+        finally:
+            notifier.set_backend(None)
+        assert any("interrupted" in n.title for n in sent)
+
+    def test_threat_listeners_hear_about_recovered_detections(self, service, sample_tree):
+        heard = []
+        service.add_threat_listener(lambda detection, action: heard.append(action))
+        self._orphan(service, sample_tree)
+        service.recover_interrupted_scans()
+        assert len(heard) == 1
+
+    def test_recovery_is_idempotent(self, service, sample_tree):
+        self._orphan(service, sample_tree)
+        assert service.recover_interrupted_scans() == 1
+        assert service.recover_interrupted_scans() == 0
+
+    def test_a_running_scan_is_not_mistaken_for_a_crash(self, service, sample_tree, monkeypatch):
+        monkeypatch.setenv("FAKE_CLAMSCAN_DELAY", "0.05")
+        job = service.start_scan(ScanKind.CUSTOM, [sample_tree])
+        try:
+            assert service.recover_interrupted_scans() == 0
+            assert service.history.scan(job.job_id).in_progress
+        finally:
+            service.stop_scan()
+            job.wait(30)
+
+    def test_a_scan_is_on_record_while_it_is_still_running(self, service, sample_tree, monkeypatch):
+        monkeypatch.setenv("FAKE_CLAMSCAN_DELAY", "0.05")
+        job = service.start_scan(ScanKind.CUSTOM, [sample_tree])
+        try:
+            assert service.history.scan(job.job_id) is not None
+        finally:
+            service.stop_scan()
+            job.wait(30)
+
+    def test_detections_are_saved_the_moment_they_are_found(self, service, sample_tree, monkeypatch):
+        monkeypatch.setenv("FAKE_CLAMSCAN_DELAY", "0.02")
+        seen = {}
+
+        def on_detection(result):
+            seen["saved"] = [d.action for d in service.history.detections()]
+
+        job = service.start_scan(ScanKind.CUSTOM, [sample_tree], on_detection=on_detection)
+        assert job.wait(60)
+        assert seen["saved"] == ["found"]
+
+    def test_a_failing_journal_never_stops_the_scan(self, service, sample_tree, monkeypatch):
+        def broken(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(service.history, "checkpoint_scan", broken)
+        monkeypatch.setattr(service.history, "record_detection", broken)
+        job = _run(service, [sample_tree])
+        assert job.state.value == "completed"
+        assert [d.action for d in service.history.detections()] == ["quarantine"]

@@ -7,7 +7,7 @@ __all__ = ["APP_ID", "APP_NAME", "COPYRIGHT", "HOMEPAGE", "VERSION", "VERSION_IN
 APP_NAME = "ClamMac"
 APP_ID = "com.clammac.ClamMac"
 
-VERSION_INFO = (1, 1, 0)
+VERSION_INFO = (1, 2, 0)
 VERSION = ".".join(str(part) for part in VERSION_INFO)
 
 COPYRIGHT = "Copyright (C) 2026 ClamMac contributors"

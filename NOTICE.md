@@ -116,11 +116,14 @@ licence.
 
 ## Icon and artwork
 
-The ClamMac application icon is generated procedurally by
-[`packaging/make_icon.py`](packaging/make_icon.py) from geometric primitives
-written for this project. It contains no traced, copied, or derived artwork, no
-third-party icon set, and no font glyph outlines. It deliberately does not
-resemble the branding of ClamAV or of any other antivirus product.
+The ClamMac application icon is the artwork in
+[`clammac/resources/app-icon.png`](clammac/resources/app-icon.png), supplied by
+the project's maintainer, set into the macOS icon tile by
+[`packaging/make_icon.py`](packaging/make_icon.py). The interface glyphs
+elsewhere in the application are drawn from geometric primitives written for
+this project. None of it is traced from, or derived from, a third-party icon
+set, and it deliberately does not resemble the branding of ClamAV or of any
+other antivirus product.
 
 ## No warranty
 
