@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import shutil
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
@@ -25,12 +27,16 @@ from .log import get_logger
 from .network import NetworkAudit, Severity
 from .notifications import notifier
 from .quarantine import Quarantine, QuarantineError
-from .scanner import FileResult, FileStatus, ScanJob, ScanKind
+from .scanner import FileResult, FileStatus, ScanJob, ScanKind, ScanProgress
 from .watcher import RealtimeWatcher, WatcherState, WatchEvent
 
 log = get_logger(__name__)
 
 __all__ = ["AppService", "Health", "ProtectionStatus"]
+
+#: How often a running scan saves its counters. Short enough that a crash loses
+#: seconds rather than minutes; long enough to be invisible next to the scan.
+CHECKPOINT_SECONDS = 3.0
 
 
 class Health(str, Enum):
@@ -258,8 +264,22 @@ class AppService:
                 targets=chosen,
                 settings=self.settings,
                 kind=kind,
-                on_progress=on_progress,
-                on_detection=on_detection,
+            )
+            job.on_progress = self._journaled_progress(job, on_progress)
+            job.on_detection = self._journaled_detection(job, on_detection)
+            # The scan is written down before it begins, so that a crash at
+            # any later point leaves a record of it rather than nothing.
+            self._journal(
+                self.history.begin_scan,
+                ScanRecord(
+                    id=job.job_id,
+                    kind=kind.value,
+                    targets=[str(t) for t in chosen],
+                    started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+                    state="running",
+                    engine_version=info.engine_version,
+                    database_version=info.database_version,
+                ),
             )
 
             def finished(finished_job: ScanJob) -> None:
@@ -278,14 +298,125 @@ class AppService:
             job.start()
             return job
 
+    # -- crash safety -----------------------------------------------------
+
+    @staticmethod
+    def _journal(write, *args, **kwargs) -> None:
+        """Run a history write that must never be allowed to interrupt a scan."""
+        try:
+            write(*args, **kwargs)
+        except Exception:
+            log.exception("could not journal scan progress")
+
+    def _journaled_progress(self, job: ScanJob, downstream):
+        """Pass progress on, saving a checkpoint every few seconds on the way."""
+        last_saved = 0.0
+
+        def progress(update: ScanProgress) -> None:
+            nonlocal last_saved
+            now = time.monotonic()
+            if now - last_saved >= CHECKPOINT_SECONDS and update.state.is_active:
+                last_saved = now
+                self._journal(
+                    self.history.checkpoint_scan,
+                    job.job_id,
+                    state=update.state.value,
+                    scanned=update.scanned,
+                    infected=update.infected,
+                    errors=update.errors,
+                    duration=update.elapsed,
+                )
+            if downstream is not None:
+                downstream(update)
+
+        return progress
+
+    def _journaled_detection(self, job: ScanJob, downstream):
+        """Save each detection the instant it is found, then pass it on."""
+
+        def detected(result: FileResult) -> None:
+            self._journal(
+                self.history.record_detection, job.job_id, result.path, result.signature
+            )
+            if downstream is not None:
+                downstream(result)
+
+        return detected
+
+    def recover_interrupted_scans(self) -> int:
+        """Settle scans a previous run left unfinished, and tell the user.
+
+        A scan whose owning process is gone was cut short by a crash, a force
+        quit or a power loss. What it had counted and everything it had found
+        was already saved as it went; this closes the scan out as interrupted
+        and applies the configured response to any detection that was still
+        waiting for one, exactly as the finished scan would have.
+        """
+        recovered = 0
+        for record in self.history.orphaned_scans():
+            pending = self.history.pending_detections(record.id)
+            action = self.settings.scan.on_threat
+            for item in pending:
+                detection = FileResult(
+                    item.path, FileStatus.INFECTED, signature=item.signature
+                )
+                if not Path(item.path).exists():
+                    applied, quarantine_id = "missing", ""
+                else:
+                    applied, quarantine_id = self._act_on(detection, action, record.id)
+                self.history.settle_detection(
+                    record.id, item.path, item.signature, applied, quarantine_id
+                )
+                for listener in list(self._threat_listeners):
+                    try:
+                        listener(detection, applied)
+                    except Exception:
+                        log.exception("a threat listener raised")
+
+            found = len(self.history.detections(scan_id=record.id, limit=100000))
+            self.history.mark_interrupted(record.id, infected=found)
+            try:
+                label = ScanKind(record.kind).label
+            except ValueError:
+                label = "Scan"
+            self.history.record_event(
+                "scan",
+                f"{label} was interrupted after {record.scanned:,} files "
+                f"with {found} found; ClamMac had closed unexpectedly.",
+                "warning",
+            )
+            log.warning(
+                "recovered interrupted scan %s: %d scanned, %d found",
+                record.id,
+                record.scanned,
+                found,
+            )
+            if self.settings.interface.notifications and record.kind != ScanKind.SELFTEST.value:
+                detail = (
+                    f"{found} {'threat was' if found == 1 else 'threats were'} found before it stopped"
+                    if found
+                    else "Nothing had been found before it stopped"
+                )
+                post = notifier.threat if found else notifier.warn
+                post(
+                    f"{label} was interrupted",
+                    f"ClamMac closed unexpectedly during the scan, after {record.scanned:,} "
+                    f"files. {detail}. Open History to review it, and scan again to finish.",
+                )
+            recovered += 1
+        if recovered:
+            self.notify_status()
+        return recovered
+
     def _handle_scan_finished(self, job: ScanJob) -> None:
         """Apply the configured action to each detection, then record it all."""
         action = self.settings.scan.on_threat
-        recorded: list[tuple[str, str, str, str]] = []
 
         for detection in job.detections:
             applied, quarantine_id = self._act_on(detection, action, job.job_id)
-            recorded.append((detection.path, detection.signature, applied, quarantine_id))
+            self.history.settle_detection(
+                job.job_id, detection.path, detection.signature, applied, quarantine_id
+            )
             for listener in list(self._threat_listeners):
                 try:
                     listener(detection, applied)
@@ -309,8 +440,6 @@ class AppService:
                 data_scanned_mb=job.summary.data_scanned_mb,
             )
         )
-        if recorded:
-            self.history.record_detections(job.job_id, recorded)
 
         if job.kind is not ScanKind.SELFTEST and self.settings.interface.notifications:
             notifier.scan_finished(

@@ -79,6 +79,11 @@ def run_scheduled_scan(target: str) -> int:
             return 2
         kind, targets = ScanKind.SCHEDULED, [candidate]
 
+    try:
+        service.recover_interrupted_scans()
+    except Exception:
+        log.exception("could not recover interrupted scans")
+
     log.info("starting scheduled scan of %s", ", ".join(str(t) for t in targets))
     job = service.start_scan(kind, targets)
     job.wait()
@@ -141,6 +146,11 @@ def run_gui(arguments: argparse.Namespace) -> int:
         window.show()
 
     def after_start() -> None:
+        # Before anything else: settle whatever a previous crash left unfinished.
+        try:
+            service.recover_interrupted_scans()
+        except Exception:
+            log.exception("could not recover interrupted scans")
         service.notify_status()
 
         if not service.settings.interface.completed_first_run or service.engine is None:

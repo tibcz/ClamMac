@@ -106,14 +106,30 @@ class HistoryPage(Page):
             self.scan_table.setItem(row, 2, target)
             self.scan_table.setItem(row, 3, QTableWidgetItem(f"{record.scanned:,}"))
 
-            outcome = QTableWidgetItem(
-                "Clean" if record.clean else f"{record.infected} found"
-            )
+            if record.in_progress:
+                text, tone = "In progress", "text_muted"
+            elif record.interrupted:
+                text = (
+                    f"Interrupted — {record.infected} found"
+                    if record.infected
+                    else "Interrupted"
+                )
+                tone = "danger" if record.infected else "warn"
+            elif record.clean:
+                text, tone = "Clean", "good"
+            else:
+                text, tone = f"{record.infected} found", "danger"
+            outcome = QTableWidgetItem(text)
+            if record.interrupted:
+                outcome.setToolTip(
+                    "ClamMac closed unexpectedly during this scan. What it had checked "
+                    "and found was saved; scan again to cover the rest."
+                )
             if self._palette is not None:
                 from PySide6.QtGui import QBrush, QColor
 
                 outcome.setForeground(
-                    QBrush(QColor(self._palette.good if record.clean else self._palette.danger))
+                    QBrush(QColor(getattr(self._palette, tone)))
                 )
             self.scan_table.setItem(row, 4, outcome)
             self.scan_table.setItem(row, 5, QTableWidgetItem(human_duration(record.duration)))

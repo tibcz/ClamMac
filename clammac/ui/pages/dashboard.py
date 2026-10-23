@@ -193,6 +193,11 @@ class DashboardPage(Page):
 
         if status.reasons:
             self.hero_detail.setText("  ".join(f"• {reason}" for reason in status.reasons[:3]))
+        elif status.last_scan is not None and status.last_scan.interrupted:
+            self.hero_detail.setText(
+                f"The last scan {relative_time(status.last_scan.started).lower()} was "
+                f"interrupted after {status.last_scan.scanned:,} files. Scan again to finish."
+            )
         elif status.last_scan is not None:
             self.hero_detail.setText(
                 f"Last scan {relative_time(status.last_scan.started).lower()} — "

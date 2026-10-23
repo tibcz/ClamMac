@@ -5,6 +5,18 @@ All notable changes to ClamMac are recorded here. This project follows
 
 ## [Unreleased]
 
+### Changed
+- **A scan now survives a crash.** Until now a scan was written to the history
+  only when it finished, so a crash, force quit or power loss mid-scan lost the
+  whole thing: how far it had got, and every threat it had found. Now the scan
+  is recorded the moment it starts, its counters are saved every few seconds,
+  and each detection is saved the instant it is found.
+- **The next launch picks up where the crash left off.** A scan whose process is
+  gone is closed out as *Interrupted* in History with everything it had
+  counted, your chosen response (quarantine, delete or report) is applied to
+  anything it had found but not yet dealt with, and a notification says what
+  happened. The Dashboard no longer reports an interrupted scan as clean.
+
 ### Fixed
 - **Crash when opening the menu bar menu on macOS 27.** On macOS 27 the system
   can open a menu bar item's menu without a mouse event being current, and Qt's

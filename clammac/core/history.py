@@ -10,6 +10,7 @@ costs microseconds and removes the whole class of problem.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Iterable
 from contextlib import contextmanager
@@ -46,7 +47,9 @@ CREATE TABLE IF NOT EXISTS scans (
     duration        REAL NOT NULL DEFAULT 0,
     engine_version  TEXT NOT NULL DEFAULT '',
     database_version INTEGER NOT NULL DEFAULT 0,
-    data_scanned_mb REAL NOT NULL DEFAULT 0
+    data_scanned_mb REAL NOT NULL DEFAULT 0,
+    owner_pid       INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS detections (
@@ -108,8 +111,40 @@ CREATE INDEX IF NOT EXISTS idx_events_when      ON events (at DESC);
 """
 
 
+#: Columns added after 1.0, applied to databases created before they existed.
+_MIGRATIONS = {
+    "scans": {
+        "owner_pid": "INTEGER NOT NULL DEFAULT 0",
+        "updated_at": "TEXT NOT NULL DEFAULT ''",
+    },
+}
+
+#: A scan in one of these states is still going, or it was when it last wrote.
+ACTIVE_STATES = ("preparing", "running", "paused", "finishing")
+
+#: The state a scan is moved to when the process that owned it vanished.
+INTERRUPTED = "interrupted"
+
+#: A detection that has been journaled but not yet acted on.
+PENDING_ACTION = "found"
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # it exists; it just is not ours
+    except OSError:
+        return False
+    return True
 
 
 @dataclass
@@ -127,6 +162,8 @@ class ScanRecord:
     engine_version: str = ""
     database_version: int = 0
     data_scanned_mb: float = 0.0
+    owner_pid: int = 0
+    updated_at: str = ""
 
     @property
     def started(self) -> datetime:
@@ -135,6 +172,14 @@ class ScanRecord:
     @property
     def clean(self) -> bool:
         return self.infected == 0
+
+    @property
+    def interrupted(self) -> bool:
+        return self.state == INTERRUPTED
+
+    @property
+    def in_progress(self) -> bool:
+        return self.state in ACTIVE_STATES
 
     @property
     def target_summary(self) -> str:
@@ -259,11 +304,51 @@ class History:
                 # WAL lets the interface read while a scan is still writing.
                 connection.execute("PRAGMA journal_mode = WAL")
                 connection.executescript(_SCHEMA)
+                self._migrate(connection)
             self.path.chmod(0o600)
         except (sqlite3.Error, OSError) as exc:
             log.error("could not prepare the history database: %s", exc)
 
+    @staticmethod
+    def _migrate(connection: sqlite3.Connection) -> None:
+        for table, columns in _MIGRATIONS.items():
+            present = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+            for column, definition in columns.items():
+                if column not in present:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     # -- writes -----------------------------------------------------------
+
+    def begin_scan(self, record: ScanRecord) -> None:
+        """Write a scan down the moment it starts, before any of it can be lost.
+
+        The row is the journal entry that lets a later launch tell "finished"
+        from "the process died": until :meth:`record_scan` closes it out, its
+        state is an active one and ``owner_pid`` names the process responsible.
+        """
+        record.owner_pid = record.owner_pid or os.getpid()
+        record.updated_at = _now()
+        self.record_scan(record)
+
+    def checkpoint_scan(
+        self,
+        scan_id: str,
+        *,
+        state: str,
+        scanned: int,
+        infected: int,
+        errors: int,
+        duration: float,
+    ) -> None:
+        """Save a running scan's counters. Never touches a scan already closed."""
+        placeholders = ",".join("?" for _ in ACTIVE_STATES)
+        with self._connect() as connection:
+            connection.execute(
+                f"""UPDATE scans SET state=?, scanned=?, infected=?, errors=?,
+                      duration=?, updated_at=?
+                   WHERE id=? AND state IN ({placeholders})""",
+                (state, scanned, infected, errors, duration, _now(), scan_id, *ACTIVE_STATES),
+            )
 
     def record_scan(self, record: ScanRecord) -> None:
         with self._connect() as connection:
@@ -271,13 +356,14 @@ class History:
                 """INSERT INTO scans
                    (id, kind, targets, started_at, finished_at, state, scanned,
                     infected, errors, duration, engine_version, database_version,
-                    data_scanned_mb)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    data_scanned_mb, owner_pid, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(id) DO UPDATE SET
                      finished_at=excluded.finished_at, state=excluded.state,
                      scanned=excluded.scanned, infected=excluded.infected,
                      errors=excluded.errors, duration=excluded.duration,
-                     data_scanned_mb=excluded.data_scanned_mb""",
+                     data_scanned_mb=excluded.data_scanned_mb,
+                     updated_at=excluded.updated_at""",
                 (
                     record.id,
                     record.kind,
@@ -292,8 +378,44 @@ class History:
                     record.engine_version,
                     record.database_version,
                     record.data_scanned_mb,
+                    record.owner_pid,
+                    record.updated_at or _now(),
                 ),
             )
+
+    def record_detection(
+        self,
+        scan_id: str,
+        path: str,
+        signature: str,
+        action: str = PENDING_ACTION,
+        quarantine_id: str = "",
+    ) -> None:
+        """Store one detection straight away, before anything has been done about it."""
+        self.record_detections(scan_id, [(path, signature, action, quarantine_id)])
+
+    def settle_detection(
+        self, scan_id: str, path: str, signature: str, action: str, quarantine_id: str = ""
+    ) -> None:
+        """Record what became of a journaled detection, adding it if it was never journaled."""
+        with self._connect() as connection:
+            updated = connection.execute(
+                """UPDATE detections SET action=?, quarantine_id=?
+                   WHERE scan_id=? AND path=? AND signature=? AND action=?""",
+                (action, quarantine_id, scan_id, path, signature, PENDING_ACTION),
+            ).rowcount
+            if not updated:
+                already = connection.execute(
+                    "SELECT 1 FROM detections WHERE scan_id=? AND path=? AND signature=?",
+                    (scan_id, path, signature),
+                ).fetchone()
+                if not already:
+                    connection.execute(
+                        """INSERT INTO detections
+                           (scan_id, path, signature, detected_at, action, quarantine_id)
+                           VALUES (?,?,?,?,?,?)""",
+                        (scan_id, path, signature, _now(), action, quarantine_id),
+                    )
 
     def record_detections(self, scan_id: str, items: Iterable[tuple[str, str, str, str]]) -> None:
         """Store detections as ``(path, signature, action, quarantine_id)``."""
@@ -392,8 +514,44 @@ class History:
         return _scan_from_row(row) if row else None
 
     def last_scan(self) -> ScanRecord | None:
-        found = self.scans(limit=1)
-        return found[0] if found else None
+        """The most recent scan that is over; one still running has no result yet."""
+        placeholders = ",".join("?" for _ in ACTIVE_STATES)
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT * FROM scans WHERE state NOT IN ({placeholders}) "
+                "ORDER BY started_at DESC LIMIT 1",
+                ACTIVE_STATES,
+            ).fetchone()
+        return _scan_from_row(row) if row else None
+
+    def orphaned_scans(self) -> list[ScanRecord]:
+        """Scans left active by a process that no longer exists."""
+        placeholders = ",".join("?" for _ in ACTIVE_STATES)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM scans WHERE state IN ({placeholders}) ORDER BY started_at",
+                ACTIVE_STATES,
+            ).fetchall()
+        mine = os.getpid()
+        return [
+            record
+            for record in map(_scan_from_row, rows)
+            if record.owner_pid != mine and not _process_alive(record.owner_pid)
+        ]
+
+    def mark_interrupted(self, scan_id: str, *, infected: int) -> None:
+        """Close out an orphaned scan, keeping everything it had counted."""
+        placeholders = ",".join("?" for _ in ACTIVE_STATES)
+        with self._connect() as connection:
+            connection.execute(
+                f"""UPDATE scans SET state=?, infected=?,
+                      finished_at=CASE WHEN updated_at != '' THEN updated_at ELSE ? END
+                   WHERE id=? AND state IN ({placeholders})""",
+                (INTERRUPTED, infected, _now(), scan_id, *ACTIVE_STATES),
+            )
+
+    def pending_detections(self, scan_id: str) -> list[DetectionRecord]:
+        return [d for d in self.detections(scan_id=scan_id, limit=100000) if d.action == PENDING_ACTION]
 
     def detections(
         self, scan_id: str = "", limit: int = 500, search: str = ""
@@ -487,7 +645,7 @@ class History:
         with self._connect() as connection:
             scans = connection.execute(
                 "SELECT COUNT(*) c, COALESCE(SUM(scanned),0) f, COALESCE(SUM(duration),0) d "
-                "FROM scans WHERE state = 'completed'"
+                "FROM scans WHERE state IN ('completed', 'interrupted')"
             ).fetchone()
             threats = connection.execute("SELECT COUNT(*) c FROM detections").fetchone()
             recent = connection.execute(
@@ -565,4 +723,6 @@ def _scan_from_row(row: sqlite3.Row) -> ScanRecord:
         engine_version=row["engine_version"],
         database_version=row["database_version"],
         data_scanned_mb=row["data_scanned_mb"],
+        owner_pid=row["owner_pid"],
+        updated_at=row["updated_at"],
     )
