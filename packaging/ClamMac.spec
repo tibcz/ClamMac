@@ -68,6 +68,8 @@ DATA_FILES = [
 ]
 if ICON.exists():
     DATA_FILES.append((str(ICON), "clammac/resources"))
+# The in-app icon (window, About box, setup) is drawn from the same artwork.
+DATA_FILES.append((str(REPO_ROOT / "clammac" / "resources" / "app-icon.png"), "clammac/resources"))
 
 analysis = Analysis(
     [str(REPO_ROOT / "clammac" / "__main__.py")],

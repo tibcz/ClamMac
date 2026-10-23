@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Generate ClamMac's application icon.
 
-The artwork is drawn from geometric primitives by ``clammac.ui.icons`` -- no
-traced shapes, no third-party icon set, no font outlines -- so the icon carries
-the same licence as the rest of the project and nothing needs attributing.
+The artwork is ``clammac/resources/app-icon.png``, a full-bleed square.
+``clammac.ui.icons.app_icon_pixmap`` sets it into the macOS icon tile (mask,
+shadow, edge light), and this script writes that out at every size macOS wants.
+Replace the PNG and run it again to change the icon.
 
 ``.icns`` is written directly rather than shelling out to ``iconutil``, so the
 icon can be produced on any platform. That matters for continuous integration
@@ -67,8 +68,8 @@ def _render(size: int) -> bytes:
     if QGuiApplication.instance() is None:
         QGuiApplication(["make_icon"])
 
-    # Draw large and downsample: the check mark's stroke stays smooth at 16px
-    # this way, where drawing it directly at 16px would alias badly.
+    # Render large and downsample: edges stay smooth at 16px this way, where
+    # rendering directly at 16px would alias badly.
     pixmap = app_icon_pixmap(1024)
     if size != 1024:
         pixmap = pixmap.scaled(

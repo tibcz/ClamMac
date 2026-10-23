@@ -3,9 +3,12 @@
 All notable changes to ClamMac are recorded here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] — 2026-10-23
 
 ### Changed
+- **A new application icon.** A white C on a deep purple gradient, set into the
+  standard macOS tile. It is used everywhere the app shows itself: the Dock,
+  the window, the About box, the setup assistant and the disk image.
 - **A scan now survives a crash.** Until now a scan was written to the history
   only when it finished, so a crash, force quit or power loss mid-scan lost the
   whole thing: how far it had got, and every threat it had found. Now the scan
