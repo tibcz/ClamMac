@@ -3,7 +3,7 @@
 All notable changes to ClamMac are recorded here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.3.0] - 2026-11-09
 
 ### Changed
 - **Full scans use every performance core.** A full scan used to run a single
