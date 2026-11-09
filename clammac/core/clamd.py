@@ -139,6 +139,15 @@ class ClamdClient:
         reply = self._command(f"{command} {path}")
         return _parse_verdicts(reply, str(path))
 
+    def scan_file(self, path: str) -> ScanVerdict:
+        """Scan exactly one regular file and return clamd's verdict on it.
+
+        The reply is matched against the path that was sent rather than split
+        on line breaks, so a file whose name contains a newline or ``": "``
+        still gets the right verdict.
+        """
+        return _parse_single_verdict(self._command(f"SCAN {path}"), path)
+
     def scan_stream(self, path: Path) -> ScanVerdict:
         """Send a file's contents to clamd over the socket.
 
@@ -170,6 +179,23 @@ class ClamdClient:
         return ScanVerdict(str(path), False, error=f"clamd gave no verdict for {size} bytes")
 
 
+def _parse_single_verdict(reply: str, path: str) -> ScanVerdict:
+    """Read clamd's answer to ``SCAN`` on one file."""
+    text = reply.strip()
+    prefix = f"{path}: "
+    body = text[len(prefix) :] if text.startswith(prefix) else text.rpartition(": ")[2] or text
+    if body.endswith(" FOUND"):
+        signature = body[: -len(" FOUND")].strip()
+        if signature.endswith("(Multiple)"):
+            signature = signature[: -len("(Multiple)")].strip()
+        return ScanVerdict(path, True, signature=signature)
+    if body == "OK":
+        return ScanVerdict(path, False)
+    if body.endswith(" ERROR"):
+        return ScanVerdict(path, False, error=body[: -len(" ERROR")].strip())
+    return ScanVerdict(path, False, error=body or "clamd gave no verdict")
+
+
 def _parse_verdicts(reply: str, fallback_path: str) -> list[ScanVerdict]:
     verdicts: list[ScanVerdict] = []
     for line in reply.splitlines():
@@ -195,9 +221,19 @@ def _parse_verdicts(reply: str, fallback_path: str) -> list[ScanVerdict]:
 class ClamdDaemon:
     """Starts, stops and supervises ClamMac's private clamd process."""
 
-    def __init__(self, tools: engine_module.EngineTools) -> None:
+    def __init__(
+        self,
+        tools: engine_module.EngineTools,
+        *,
+        name: str = "clamd",
+        max_threads: int = 4,
+        low_priority: bool = False,
+    ) -> None:
         self.tools = tools
-        self.socket_path = paths.runtime_dir() / "clamd.sock"
+        self.name = name
+        self.max_threads = max_threads
+        self.low_priority = low_priority
+        self.socket_path = paths.runtime_dir() / f"{name}.sock"
         self.client = ClamdClient(self.socket_path)
         self._process: subprocess.Popen[bytes] | None = None
         self._lock = threading.RLock()
@@ -223,12 +259,15 @@ class ClamdDaemon:
             if self.tools.clamd is None:
                 raise ClamdError("this ClamAV installation does not include clamd")
 
-            config = engine_module.write_clamd_conf(settings=settings)
+            config = engine_module.write_clamd_conf(
+                settings=settings, name=self.name, max_threads=self.max_threads
+            )
             self._clear_stale_socket()
 
-            log.info("starting clamd with %s", config)
+            prefix = ["/usr/bin/nice", "-n", "10"] if self.low_priority else []
+            log.info("starting %s with %s", self.name, config)
             self._process = subprocess.Popen(
-                [str(self.tools.clamd), f"--config-file={config}"],
+                [*prefix, str(self.tools.clamd), f"--config-file={config}"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
@@ -240,10 +279,10 @@ class ClamdDaemon:
                 if self._process.poll() is not None:
                     raise ClamdError(
                         f"clamd exited immediately with status {self._process.returncode}. "
-                        f"See {paths.logs_dir() / 'clamd.log'} for details."
+                        f"See {paths.logs_dir() / (self.name + '.log')} for details."
                     )
                 if self.client.ping():
-                    log.info("clamd is ready")
+                    log.info("%s is ready", self.name)
                     return True
                 time.sleep(0.5)
 
@@ -266,6 +305,32 @@ class ClamdDaemon:
                     with contextlib.suppress(subprocess.TimeoutExpired):
                         process.wait(timeout=5)
             self._process = None
+            self._clear_stale_socket()
+
+    def kill(self) -> None:
+        """Stop the daemon at once, abandoning whatever it is scanning.
+
+        ``stop`` lets clamd finish its current files, which is right for
+        real-time protection and far too slow for a cancelled full scan, where
+        a single large archive can keep it busy for minutes.
+        """
+        # Deliberately signalled outside the lock: ``start`` holds it for as
+        # long as the database takes to load, and a cancel must not wait for
+        # that. Killing the process is also what makes ``start`` give up.
+        process = self._process
+        if process is not None and process.poll() is None:
+            with contextlib.suppress(OSError, ProcessLookupError):
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(OSError, ProcessLookupError):
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
+        with self._lock:
+            if self._process is process:
+                self._process = None
             self._clear_stale_socket()
 
     def restart(self, *, settings=None) -> bool:

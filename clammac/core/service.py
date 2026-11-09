@@ -241,6 +241,18 @@ class AppService:
             return paths.default_scan_targets()
         return list(targets or [])
 
+    @staticmethod
+    def scans_in_parallel(kind: ScanKind, targets: list[Path]) -> bool:
+        """Whether a scan is big enough to be worth every core.
+
+        Full scans, by hand or on a schedule, cover the whole home folder and
+        run for hours on one core. Quick and custom scans stay on clamscan:
+        they are short, and starting a second daemon would not pay for itself.
+        """
+        if kind is ScanKind.FULL:
+            return True
+        return kind is ScanKind.SCHEDULED and targets == paths.default_scan_targets()
+
     def start_scan(
         self,
         kind: ScanKind = ScanKind.CUSTOM,
@@ -264,6 +276,7 @@ class AppService:
                 targets=chosen,
                 settings=self.settings,
                 kind=kind,
+                parallel=self.scans_in_parallel(kind, chosen),
             )
             job.on_progress = self._journaled_progress(job, on_progress)
             job.on_detection = self._journaled_detection(job, on_detection)
