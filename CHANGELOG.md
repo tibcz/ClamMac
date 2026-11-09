@@ -3,6 +3,19 @@
 All notable changes to ClamMac are recorded here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-09
+
+### Changed
+- **Full scans use every performance core.** A full scan used to run a single
+  clamscan, which keeps one core busy and leaves the rest idle. It now brings up
+  a private clamd for the length of the scan, with one thread per performance
+  core and one shared copy of the signature database, and ClamMac hands it the
+  files one at a time. On a 10-core Mac that measured 4 to 5 times faster on
+  real folders, with the same files scanned and the same detections. The live
+  counter, current file and pause work as before. Scheduled full scans get the
+  same treatment; quick and custom scans still use clamscan. If clamd is
+  missing or will not start, the scan falls back to clamscan on its own.
+
 ## [1.2.0] — 2026-10-23
 
 ### Changed
